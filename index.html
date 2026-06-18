@@ -714,16 +714,17 @@ function update(){
 // ── screens ───────────────────────────────────────────
 function drawStart(){
   dSky();clouds.forEach(dCloud);dBgBuildings();dGround();
-  const bw=Math.min(420,W-32),bh=220;
+  const bw=Math.min(420,W-32),bh=240;
   ctx.fillStyle='rgba(0,0,0,.6)';ctx.beginPath();ctx.roundRect(W/2-bw/2,H/2-bh/2,bw,bh,18);ctx.fill();
   ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
   ctx.font=`bold ${Math.min(22,W*.038)}px sans-serif`;ctx.fillText('🎈 Кунгурские аэронавты',W/2,H/2-78);
   ctx.font=`${Math.min(13,W*.022)}px sans-serif`;ctx.fillStyle='rgba(255,255,255,.85)';
   ctx.fillText('Облетай деревья, тучи и птиц',W/2,H/2-44);
-  ctx.fillText('⛽ газ  🛡 щит  ❤️ жизнь  ⚡ подъём  🧲 магнит  🫧 малыш  🚀 турбо',W/2,H/2-18);
-  ctx.fillText('Кунгур → Пермь → Москва',W/2,H/2+8);
+  ctx.fillText('⛽ газ  🛡 щит  ❤️ жизнь  ⚡ подъём',W/2,H/2-18);
+  ctx.fillText('🧲 магнит  🫧 малыш  🚀 турбо',W/2,H/2+8);
+  ctx.fillText('Кунгур → Пермь → Москва',W/2,H/2+34);
   ctx.fillStyle='#FFB300';ctx.font=`bold ${Math.min(17,W*.028)}px sans-serif`;
-  ctx.fillText('▶  Нажми / коснись экрана',W/2,H/2+62);
+  ctx.fillText('▶  Нажми / коснись экрана',W/2,H/2+76);
 }
 function drawDead(){
   ctx.fillStyle='rgba(0,0,0,.65)';ctx.fillRect(0,0,W,H);
