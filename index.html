@@ -619,21 +619,20 @@ function initSprites(){
 
 // ── init ──────────────────────────────────────────────
 function initStars(){stars=[];for(let i=0;i<80;i++)stars.push({x:rnd(0,W),y:rnd(0,H*.6),r:rnd(.4,2),t:rnd(0,6.28)});}
+function makePuffs(rx,ry){
+  const np=Math.floor(rnd(3,6)),puffs=[];
+  for(let p=0;p<np;p++)puffs.push({ox:rnd(-rx*.65,rx*.65),oy:rnd(-ry*.3,ry*.55),r:rnd(ry*.65,ry*1.35)});
+  return puffs;
+}
 function initClouds(){
   clouds=[];
-  for(let i=0;i<8;i++){
-    const rx=rnd(38,80),ry=rnd(16,30);
-    // each cloud has random puffs array for variety
-    const np=Math.floor(rnd(3,6));
-    const puffs=[];
-    for(let p=0;p<np;p++){
-      puffs.push({
-        ox:rnd(-rx*.7,rx*.7),
-        oy:rnd(-ry*.4,ry*.6),
-        r:rnd(ry*.7,ry*1.4)
-      });
-    }
-    clouds.push({x:rnd(0,W),y:rnd(18,H*.26),rx,ry,spd:rnd(.18,.48),a:rnd(.72,.96),puffs});
+  for(let i=0;i<5;i++){
+    const rx=rnd(25,50),ry=rnd(10,18);
+    clouds.push({x:rnd(0,W),y:rnd(18,H*.22),rx,ry,spd:rnd(.1,.25),a:rnd(.35,.55),layer:0,puffs:makePuffs(rx,ry)});
+  }
+  for(let i=0;i<6;i++){
+    const rx=rnd(42,85),ry=rnd(16,32);
+    clouds.push({x:rnd(0,W),y:rnd(20,H*.3),rx,ry,spd:rnd(.28,.55),a:rnd(.75,.97),layer:1,puffs:makePuffs(rx,ry)});
   }
 }
 function initBgDecor(){
@@ -747,6 +746,44 @@ function dKremlin(x,y){
   ctx.fillStyle='#111';ctx.beginPath();ctx.ellipse(0,-12,10,14,0,Math.PI,0);ctx.fill();ctx.fillRect(-10,-12,20,14);
   ctx.restore();
 }
+// ── parallax hills ────────────────────────────────────
+let hillsOff=0;
+function dHills(){
+  hillsOff=(hillsOff+spd*.08)%(W*2);
+  const gh=H-50;
+  const isN=timeIdx===3;
+  // far hills — very muted
+  const farCol=isN?'#152510':'#7AAA55';
+  const farShadow=isN?'#0E1A0A':'#628A40';
+  ctx.fillStyle=farCol;
+  ctx.beginPath();ctx.moveTo(-hillsOff%W,gh);
+  for(let x=0;x<=W+120;x+=60){
+    const hx=((x-hillsOff*.6)%(W+200));
+    const hy=gh - 55 - Math.sin(hx*.012+1)*38 - Math.sin(hx*.021+2)*22;
+    ctx.lineTo(x,hy);
+  }
+  ctx.lineTo(W,gh);ctx.closePath();ctx.fill();
+  // shadow strip on far hills
+  ctx.fillStyle=farShadow;
+  ctx.beginPath();ctx.moveTo(0,gh);
+  for(let x=0;x<=W;x+=60){
+    const hx=((x-hillsOff*.6)%(W+200));
+    const hy=gh - 55 - Math.sin(hx*.012+1)*38 - Math.sin(hx*.021+2)*22;
+    ctx.lineTo(x,hy+12);
+  }
+  ctx.lineTo(W,gh);ctx.closePath();ctx.fill();
+  // near hills — more saturated
+  const nearCol=isN?'#1E3A14':'#5A9A38';
+  ctx.fillStyle=nearCol;
+  ctx.beginPath();ctx.moveTo(0,gh);
+  for(let x=0;x<=W+80;x+=40){
+    const hx=((x-hillsOff)%(W+160));
+    const hy=gh - 30 - Math.sin(hx*.018+3)*28 - Math.sin(hx*.032+1)*14;
+    ctx.lineTo(x,hy);
+  }
+  ctx.lineTo(W,gh);ctx.closePath();ctx.fill();
+}
+
 function dBgBuildings(){
   bgB.forEach(b=>{
     b.x-=spd*.12;if(b.x<-b.w)b.x=W+b.w;
@@ -991,9 +1028,11 @@ function spawnTree(){
   const hRanges=[[H*.12,H*.20],[H*.22,H*.32],[H*.33,H*.44]];
   const [hMin,hMax]=hRanges[sizeClass];
   const h=rnd(hMin,hMax);
-  const widths=[104,130,100];
-  const scale=h/[165,200,200][variant];
-  trees.push({x:W+30,y:H-50-h,w:widths[variant]*scale,h,variant});
+  const srcH=[165,200,200][variant];
+  const srcW=[104,130,100][variant];
+  const scale=h/srcH;
+  const w=srcW*scale;
+  trees.push({x:W+w/2+10,y:H-50-h,w,h,variant});
 }
 function spawnPickup(){
   const T=['invincible','life','speed','magnet','tiny','turbo'];
@@ -1093,36 +1132,39 @@ function update(){
 }
 
 function drawStart(){
-  dSky();clouds.forEach(dCloud);dBgBuildings();dGround();
-  const fs=Math.min(13,W*.028);
-  const bw=Math.min(380,W-40),bh=210;
-  const bx2=W/2-bw/2, by2=H/2-bh/2;
-  ctx.fillStyle='rgba(0,0,0,.62)';
+  dSky();clouds.forEach(dCloud);dHills();dBgBuildings();dGround();
+  // adaptive font size based on screen width
+  const fs=Math.max(11,Math.min(14,W*.030));
+  const titleFs=Math.max(16,Math.min(22,W*.045));
+  const bw=Math.min(360,W-32);
+  const lineH=fs+10;
+  const lines=[
+    {t:'Облетай деревья, тучи и птиц',c:'rgba(255,255,255,.75)'},
+    {t:'⛽ газ  🛡 щит  ❤️ жизнь  ⚡ подъём',c:'rgba(255,255,255,.75)'},
+    {t:'🧲 магнит  🫧 малыш  🚀 турбо',c:'rgba(255,255,255,.75)'},
+    {t:'Кунгур → Пермь → Москва',c:'rgba(255,255,255,.5)'},
+  ];
+  const btnH=Math.max(36,H*.055);
+  const bh=titleFs+16+lines.length*(lineH)+btnH+30+24;
+  const bx2=W/2-bw/2,by2=H/2-bh/2;
+  ctx.fillStyle='rgba(0,0,0,.65)';
   ctx.beginPath();ctx.roundRect(bx2,by2,bw,bh,18);ctx.fill();
-  // title
   ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='top';
-  ctx.font=`bold ${Math.min(20,W*.042)}px sans-serif`;
-  ctx.fillText('🎈 Кунгурские аэронавты',W/2,by2+18);
-  // subtitle
-  ctx.font=`${fs}px sans-serif`;ctx.fillStyle='rgba(255,255,255,.8)';
-  ctx.fillText('Облетай деревья, тучи и птиц',W/2,by2+52);
-  // boosts row 1
-  ctx.fillText('⛽ газ  🛡 щит  ❤️ жизнь  ⚡ подъём',W/2,by2+76);
-  // boosts row 2
-  ctx.fillText('🧲 магнит  🫧 малыш  🚀 турбо',W/2,by2+98);
-  // route
-  ctx.fillStyle='rgba(255,255,255,.65)';
-  ctx.fillText('Кунгур → Пермь → Москва',W/2,by2+120);
-  // cta button
-  const btnW=Math.min(260,bw-40),btnH=36,btnX=W/2-btnW/2,btnY=by2+bh-54;
-  ctx.fillStyle='#FFB300';ctx.beginPath();ctx.roundRect(btnX,btnY,btnW,btnH,10);ctx.fill();
-  ctx.fillStyle='#3A2000';ctx.font=`bold ${Math.min(15,W*.03)}px sans-serif`;
+  ctx.font=`bold ${titleFs}px sans-serif`;
+  ctx.fillText('🎈 Кунгурские аэронавты',W/2,by2+14);
+  ctx.font=`${fs}px sans-serif`;
+  lines.forEach((l,i)=>{
+    ctx.fillStyle=l.c;
+    ctx.fillText(l.t,W/2,by2+titleFs+20+i*lineH);
+  });
+  const btnY=by2+bh-btnH-14;
+  const btnW=Math.min(bw-32,280);
+  ctx.fillStyle='#FFB300';
+  ctx.beginPath();ctx.roundRect(W/2-btnW/2,btnY,btnW,btnH,10);ctx.fill();
+  ctx.fillStyle='#3A2000';
+  ctx.font=`bold ${Math.max(13,Math.min(16,W*.032))}px sans-serif`;
   ctx.textBaseline='middle';
   ctx.fillText('▶  Нажми / коснись экрана',W/2,btnY+btnH/2);
-  // leaderboard hint
-  ctx.fillStyle='rgba(255,255,255,.55)';ctx.font=`${Math.min(11,W*.022)}px sans-serif`;
-  ctx.textBaseline='top';
-  ctx.fillText('🏆 таблица лидеров — свайп вниз',W/2,by2+bh-16);
 }
 function drawDead(){
   ctx.fillStyle='rgba(0,0,0,.65)';ctx.fillRect(0,0,W,H);
@@ -1140,8 +1182,12 @@ function draw(){
   ctx.clearRect(0,0,W,H);
   if(st==='start'){drawStart();return;}
   dSky();dStars();dSun();
-  clouds.forEach(dCloud);
+  // back layer clouds (smaller, further)
+  clouds.filter(c=>c.layer===0).forEach(dCloud);
+  dHills();
   dBgBuildings();
+  // front layer clouds (bigger, closer)
+  clouds.filter(c=>c.layer===1).forEach(dCloud);
   stormClouds.forEach(dStormCloud);
   trees.forEach(dTree);
   pkups.forEach(dPickup);
@@ -1170,7 +1216,10 @@ function reset(){
   st='play';
 }
 function handle(dn){
-  initAudio(); // start audio context on first gesture
+  initAudio();
+  // если открыт промпт имени — не перехватываем тап
+  if(document.getElementById('record-prompt').style.display==='block') return;
+  if(document.getElementById('lb-panel').style.display==='block') return;
   if((st==='start'||st==='dead')&&dn){reset();return;}
   if(st==='play')lift=dn;
 }
