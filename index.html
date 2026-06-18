@@ -34,7 +34,7 @@ html,body{width:100%;height:100%;background:#111;overflow:hidden;font-family:sys
   <div id="hb">📍 Кунгур &nbsp;⏱ рассвет</div>
   <div id="hn">Держи экран / пробел — подъём</div>
   <div id="lb"></div>
-  <div id="bw2">⚡ Туча впереди!</div>
+  <div id="bw2">⚡ Туча!</div>
 </div>
 <script>
 (function(){
@@ -49,13 +49,11 @@ function resize(){W=cv.width=cv.offsetWidth;H=cv.height=cv.offsetHeight;}
 window.addEventListener('resize',resize);
 resize();
 
-// balloon radius scales with screen — bigger on desktop
-const R_VIS = () => Math.max(32, Math.min(52, W * 0.055));
-const R_HIT = () => R_VIS() * 0.68;
-const BX    = () => Math.round(W * 0.25);
-const GY    = () => H - 50 - R_VIS() - 10;
-const CY    = () => R_VIS() + 10;
-
+const R_VIS=()=>Math.max(32,Math.min(52,W*0.055));
+const R_HIT=()=>R_VIS()*0.68;
+const BX=()=>Math.round(W*0.25);
+const GY=()=>H-50-R_VIS()-10;
+const CY=()=>R_VIS()+10;
 const LIFT=-0.95,GRAV=0.40,DAMP=0.84,LIFT_B=-1.25,GRAV_B=0.38,VMAX=8;
 
 const TIMES=[
@@ -77,18 +75,302 @@ let dieCD=0,birdWarnT=0,lbTimer=0;
 
 function rnd(a,b){return a+Math.random()*(b-a);}
 
+// ── SVG sprites → offscreen canvas ───────────────────
+const SPR={};
+function makeSVGSprite(key,svgStr,sw,sh){
+  const img=new Image();
+  const blob=new Blob([svgStr],{type:'image/svg+xml'});
+  const url=URL.createObjectURL(blob);
+  img.onload=()=>{
+    const oc=document.createElement('canvas');
+    oc.width=sw;oc.height=sh;
+    const octx=oc.getContext('2d');
+    octx.drawImage(img,0,0,sw,sh);
+    SPR[key]=oc;
+    URL.revokeObjectURL(url);
+  };
+  img.src=url;
+}
+
+function initSprites(){
+  // ── BALLOON ──────────────────────────────────────
+  makeSVGSprite('balloon',`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-80 -92 160 200">
+    <defs>
+      <clipPath id="bc"><ellipse cx="0" cy="0" rx="72" ry="78"/></clipPath>
+      <radialGradient id="bs" cx="35%" cy="30%" r="60%">
+        <stop offset="0%" stop-color="rgba(255,255,255,.32)"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,.28)"/>
+      </radialGradient>
+    </defs>
+    <g clip-path="url(#bc)">
+      <rect x="-72" y="-78" width="48" height="156" fill="#003F87"/>
+      <rect x="-24" y="-78" width="48" height="156" fill="#FFFFFF"/>
+      <rect x="24"  y="-78" width="48" height="156" fill="#CC0000"/>
+      <line x1="-48" y1="-78" x2="-48" y2="78" stroke="rgba(0,0,0,.12)" stroke-width="1.5"/>
+      <line x1="-24" y1="-78" x2="-24" y2="78" stroke="rgba(0,0,0,.15)" stroke-width="1.5"/>
+      <line x1="0"   y1="-78" x2="0"   y2="78" stroke="rgba(0,0,0,.15)" stroke-width="1.5"/>
+      <line x1="24"  y1="-78" x2="24"  y2="78" stroke="rgba(0,0,0,.15)" stroke-width="1.5"/>
+      <line x1="48"  y1="-78" x2="48"  y2="78" stroke="rgba(0,0,0,.12)" stroke-width="1.5"/>
+      <ellipse cx="0" cy="0" rx="72" ry="78" fill="url(#bs)"/>
+    </g>
+    <ellipse cx="0" cy="0" rx="72" ry="78" fill="none" stroke="rgba(0,0,0,.3)" stroke-width="2"/>
+    <ellipse cx="0" cy="0" rx="22" ry="20" fill="white" stroke="rgba(0,0,0,.2)" stroke-width="1"/>
+    <path d="M-8,-8 Q-10,-14 -6,-16 Q-2,-18 0,-14 Q2,-18 6,-16 Q10,-14 8,-8 Q10,-2 8,4 Q4,8 0,9 Q-4,8 -8,4 Q-10,-2 -8,-8Z" fill="#8B4513"/>
+    <circle cx="-5" cy="-12" r="3.5" fill="#8B4513"/>
+    <circle cx="5"  cy="-12" r="3.5" fill="#8B4513"/>
+    <ellipse cx="0" cy="-78" rx="18" ry="6" fill="rgba(0,0,0,.35)"/>
+    <circle cx="0" cy="-78" r="5" fill="#555"/>
+    <ellipse cx="0" cy="78" rx="20" ry="7" fill="rgba(0,0,0,.3)"/>
+    <line x1="-28" y1="60" x2="-20" y2="106" stroke="#5C3A10" stroke-width="2"/>
+    <line x1="-10" y1="72" x2="-12" y2="106" stroke="#5C3A10" stroke-width="2"/>
+    <line x1="10"  y1="72" x2="12"  y2="106" stroke="#5C3A10" stroke-width="2"/>
+    <line x1="28"  y1="60" x2="20"  y2="106" stroke="#5C3A10" stroke-width="2"/>
+    <rect x="-24" y="105" width="48" height="28" rx="4" fill="#8B6914" stroke="#6B4F10" stroke-width="1.5"/>
+    <line x1="-8" y1="105" x2="-8" y2="133" stroke="rgba(0,0,0,.2)" stroke-width="1"/>
+    <line x1="8"  y1="105" x2="8"  y2="133" stroke="rgba(0,0,0,.2)" stroke-width="1"/>
+    <line x1="-24" y1="119" x2="24" y2="119" stroke="rgba(0,0,0,.2)" stroke-width="1"/>
+  </svg>`,160,200);
+
+  // ── TREE 1 — ель ─────────────────────────────────
+  makeSVGSprite('tree0',`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-52 -160 104 165">
+    <rect x="-9" y="-110" width="18" height="110" rx="3" fill="#5C3310"/>
+    <rect x="-5" y="-110" width="4"  height="110" fill="rgba(255,255,255,.1)"/>
+    <path d="M-10,0 Q-22,3 -26,10" stroke="#4A2A0A" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M10,0  Q22,3  26,10"  stroke="#4A2A0A" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <polygon points="-48,-52 48,-52 0,-88"  fill="#1A5C1E"/>
+    <polygon points="-40,-72 40,-72 0,-108" fill="#246828"/>
+    <polygon points="-30,-92 30,-92 0,-124" fill="#2E7D32"/>
+    <polygon points="-22,-110 22,-110 0,-138" fill="#388E3C"/>
+    <polygon points="-14,-126 14,-126 0,-152" fill="#43A047"/>
+    <polygon points="0,-88 48,-52 0,-52"  fill="rgba(0,0,0,.08)"/>
+    <polygon points="0,-108 40,-72 0,-72" fill="rgba(0,0,0,.08)"/>
+    <line x1="-48" y1="-52"  x2="48" y2="-52"  stroke="rgba(255,255,255,.18)" stroke-width="2"/>
+    <line x1="-40" y1="-72"  x2="40" y2="-72"  stroke="rgba(255,255,255,.18)" stroke-width="2"/>
+    <line x1="-30" y1="-92"  x2="30" y2="-92"  stroke="rgba(255,255,255,.18)" stroke-width="2"/>
+  </svg>`,104,165);
+
+  // ── TREE 2 — лиственное ───────────────────────────
+  makeSVGSprite('tree1',`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-65 -195 130 200">
+    <path d="M-10,0 Q-22,3 -28,10" stroke="#6B4226" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+    <path d="M10,0  Q22,3  28,10"  stroke="#6B4226" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+    <path d="M-11,0 Q-13,-40 -10,-70 Q-8,-95 0,-108 Q8,-95 10,-70 Q13,-40 11,0Z" fill="#6B4226"/>
+    <path d="M-8,-20 Q-6,-50 -4,-75" stroke="rgba(255,255,255,.12)" stroke-width="2" fill="none"/>
+    <path d="M-5,-90 Q-30,-110 -50,-105" stroke="#5C3820" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <path d="M5,-95  Q25,-115 42,-108"   stroke="#5C3820" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <path d="M0,-100 Q-5,-125 -8,-140"   stroke="#5C3820" stroke-width="4" fill="none" stroke-linecap="round"/>
+    <circle cx="0"   cy="-148" r="46" fill="#2D6A22"/>
+    <circle cx="-38" cy="-128" r="32" fill="#2D6A22"/>
+    <circle cx="36"  cy="-124" r="34" fill="#2D6A22"/>
+    <circle cx="-18" cy="-160" r="30" fill="#338A28"/>
+    <circle cx="20"  cy="-155" r="28" fill="#338A28"/>
+    <circle cx="0"   cy="-172" r="24" fill="#3E9E32"/>
+    <circle cx="-22" cy="-168" r="14" fill="#4AAA3C"/>
+    <circle cx="14"  cy="-172" r="12" fill="#4AAA3C"/>
+    <circle cx="-5"  cy="-182" r="10" fill="#56B844"/>
+    <circle cx="40"  cy="-128" r="28" fill="rgba(0,0,0,.10)"/>
+    <circle cx="20"  cy="-148" r="22" fill="rgba(0,0,0,.08)"/>
+  </svg>`,130,200);
+
+  // ── TREE 3 — берёза ───────────────────────────────
+  makeSVGSprite('tree2',`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -196 100 200">
+    <path d="M-8,0 Q-18,4 -22,12" stroke="#B0A898" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M8,0  Q18,4  22,12"  stroke="#B0A898" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M-9,0 Q-10,-45 -8,-85 Q-5,-120 0,-138 Q5,-120 8,-85 Q10,-45 9,0Z" fill="#E8E4DC"/>
+    <path d="M5,-10 Q6,-50 5,-90 Q4,-118 2,-135" stroke="rgba(0,0,0,.1)" stroke-width="3" fill="none"/>
+    <ellipse cx="-4" cy="-25"  rx="5"   ry="3"   fill="#2A2520" opacity=".7"/>
+    <ellipse cx="5"  cy="-50"  rx="6"   ry="2.5" fill="#2A2520" opacity=".65"/>
+    <ellipse cx="-3" cy="-75"  rx="4"   ry="2"   fill="#2A2520" opacity=".6"/>
+    <ellipse cx="4"  cy="-95"  rx="5"   ry="2"   fill="#2A2520" opacity=".55"/>
+    <ellipse cx="-2" cy="-115" rx="3.5" ry="1.8" fill="#2A2520" opacity=".5"/>
+    <path d="M-4,-110 Q-25,-118 -40,-112" stroke="#C8C0B0" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M4,-115  Q22,-125  36,-118"  stroke="#C8C0B0" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M-2,-125 Q-18,-138 -28,-148" stroke="#C8C0B0" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    <path d="M2,-128  Q15,-142  22,-152"  stroke="#C8C0B0" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    <path d="M0,-132  Q-4,-150 -6,-164"   stroke="#C8C0B0" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <ellipse cx="-38" cy="-116" rx="22" ry="16" fill="#6DB842" opacity=".9"/>
+    <ellipse cx="34"  cy="-120" rx="20" ry="15" fill="#6DB842" opacity=".9"/>
+    <ellipse cx="-24" cy="-152" rx="18" ry="14" fill="#78C44C"/>
+    <ellipse cx="18"  cy="-156" rx="17" ry="14" fill="#78C44C"/>
+    <ellipse cx="-4"  cy="-168" rx="20" ry="15" fill="#82CC55"/>
+    <ellipse cx="-16" cy="-160" rx="14" ry="11" fill="#8AD45E"/>
+    <ellipse cx="10"  cy="-164" rx="13" ry="11" fill="#8AD45E"/>
+    <ellipse cx="-2"  cy="-180" rx="14" ry="10" fill="#92DC66"/>
+    <ellipse cx="-20" cy="-166" rx="7"  ry="5"  fill="rgba(255,255,255,.18)"/>
+    <ellipse cx="8"   cy="-174" rx="6"  ry="4"  fill="rgba(255,255,255,.15)"/>
+  </svg>`,100,200);
+
+  // ── STORM CLOUD (smaller) ─────────────────────────
+  makeSVGSprite('storm',`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-62 -52 124 100">
+    <ellipse cx="-22" cy="8"   rx="30" ry="22" fill="#3A3650"/>
+    <ellipse cx="22"  cy="4"   rx="34" ry="24" fill="#3C3855"/>
+    <ellipse cx="0"   cy="-6"  rx="40" ry="28" fill="#44405E"/>
+    <ellipse cx="-36" cy="14"  rx="24" ry="18" fill="#353250"/>
+    <ellipse cx="36"  cy="10"  rx="24" ry="20" fill="#353250"/>
+    <ellipse cx="-8"  cy="-14" rx="28" ry="16" fill="#5A5575"/>
+    <ellipse cx="12"  cy="-8"  rx="14" ry="8"  fill="rgba(255,255,255,.06)"/>
+    <path d="M5,-2 L-3,14 L3,14 L-7,32" stroke="#FFE840" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M5,-2 L-3,14 L3,14 L-7,32" stroke="rgba(255,230,0,.2)"  stroke-width="7"   fill="none" stroke-linecap="round"/>
+    <line x1="-40" y1="32" x2="-44" y2="46" stroke="rgba(140,160,220,.65)" stroke-width="1.5"/>
+    <line x1="-26" y1="34" x2="-29" y2="48" stroke="rgba(140,160,220,.65)" stroke-width="1.5"/>
+    <line x1="-10" y1="36" x2="-12" y2="50" stroke="rgba(140,160,220,.65)" stroke-width="1.5"/>
+    <line x1="6"   y1="36" x2="5"   y2="50" stroke="rgba(140,160,220,.65)" stroke-width="1.5"/>
+    <line x1="22"  y1="35" x2="20"  y2="49" stroke="rgba(140,160,220,.65)" stroke-width="1.5"/>
+    <line x1="38"  y1="33" x2="36"  y2="47" stroke="rgba(140,160,220,.65)" stroke-width="1.5"/>
+  </svg>`,124,100);
+
+  // ── BIRD ─────────────────────────────────────────
+  makeSVGSprite('bird',`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-38 -20 76 28">
+    <ellipse cx="0" cy="0" rx="9" ry="5" fill="#3A2810"/>
+    <path d="M-9,0 Q-22,-14 -32,-8 Q-22,-2 -9,2Z" fill="#3A2810"/>
+    <path d="M9,0  Q22,-14  32,-8 Q22,-2  9,2Z"  fill="#3A2810"/>
+    <path d="M-9,0 Q-18,-10 -26,-6" stroke="rgba(255,255,255,.15)" stroke-width="1.5" fill="none"/>
+    <path d="M9,0  Q18,-10  26,-6"  stroke="rgba(255,255,255,.15)" stroke-width="1.5" fill="none"/>
+    <circle cx="-9" cy="-1" r="5" fill="#3A2810"/>
+    <path d="M-14,-1 L-18,0 L-14,2" fill="#8B6914"/>
+    <circle cx="-10" cy="-2" r="1.5" fill="white"/>
+    <circle cx="-10" cy="-2" r=".8"  fill="#111"/>
+    <path d="M9,0 L16,4 M9,1 L16,-3" stroke="#3A2810" stroke-width="2" stroke-linecap="round" fill="none"/>
+  </svg>`,76,28);
+
+  // ── CHURCHES ─────────────────────────────────────
+  makeSVGSprite('church0',`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-46 -240 92 245">
+    <rect x="-42" y="-5" width="84" height="5" rx="1" fill="#7A2010"/>
+    <rect x="-38" y="-110" width="76" height="110" fill="#9B3528"/>
+    <line x1="-38" y1="-102" x2="38" y2="-102" stroke="rgba(0,0,0,.1)" stroke-width=".8"/>
+    <line x1="-38" y1="-94"  x2="38" y2="-94"  stroke="rgba(0,0,0,.1)" stroke-width=".8"/>
+    <line x1="-38" y1="-86"  x2="38" y2="-86"  stroke="rgba(0,0,0,.1)" stroke-width=".8"/>
+    <line x1="-38" y1="-78"  x2="38" y2="-78"  stroke="rgba(0,0,0,.1)" stroke-width=".8"/>
+    <line x1="-38" y1="-70"  x2="38" y2="-70"  stroke="rgba(0,0,0,.1)" stroke-width=".8"/>
+    <line x1="-38" y1="-62"  x2="38" y2="-62"  stroke="rgba(0,0,0,.1)" stroke-width=".8"/>
+    <line x1="-38" y1="-54"  x2="38" y2="-54"  stroke="rgba(0,0,0,.1)" stroke-width=".8"/>
+    <line x1="-38" y1="-46"  x2="38" y2="-46"  stroke="rgba(0,0,0,.1)" stroke-width=".8"/>
+    <rect x="-40" y="-113" width="80" height="6" rx="1" fill="#C04030"/>
+    <rect x="-28" y="-75" width="14" height="16" fill="rgba(160,205,240,.75)"/>
+    <path d="M-28,-75 A7,7 0 0,1 -14,-75" fill="rgba(160,205,240,.75)"/>
+    <rect x="-7"  y="-75" width="14" height="16" fill="rgba(160,205,240,.75)"/>
+    <path d="M-7,-75 A7,7 0 0,1 7,-75" fill="rgba(160,205,240,.75)"/>
+    <rect x="14"  y="-75" width="14" height="16" fill="rgba(160,205,240,.75)"/>
+    <path d="M14,-75 A7,7 0 0,1 28,-75" fill="rgba(160,205,240,.75)"/>
+    <rect x="-16" y="-188" width="32" height="80" fill="#882A18"/>
+    <rect x="-12" y="-178" width="10" height="14" fill="rgba(20,5,5,.6)" rx="2"/>
+    <path d="M-12,-178 A5,5 0 0,1 -2,-178" fill="rgba(20,5,5,.6)"/>
+    <rect x="2"   y="-178" width="10" height="14" fill="rgba(20,5,5,.6)" rx="2"/>
+    <path d="M2,-178 A5,5 0 0,1 12,-178" fill="rgba(20,5,5,.6)"/>
+    <rect x="-18" y="-196" width="36" height="12" rx="1" fill="#7A2010"/>
+    <polygon points="-12,-196 0,-232 12,-196" fill="#5A1A08"/>
+    <line x1="0" y1="-234" x2="0" y2="-222" stroke="#FFD700" stroke-width="2.5"/>
+    <line x1="-6" y1="-230" x2="6" y2="-230" stroke="#FFD700" stroke-width="2.5"/>
+    <line x1="-4" y1="-226" x2="4" y2="-226" stroke="#FFD700" stroke-width="1.5"/>
+    <ellipse cx="-28" cy="-118" rx="11" ry="7"  fill="#2E7D32"/>
+    <ellipse cx="-28" cy="-123" rx="8"  ry="9"  fill="#2E7D32"/>
+    <ellipse cx="-31" cy="-127" rx="3"  ry="4"  fill="rgba(255,255,255,.22)"/>
+    <line x1="-28" y1="-134" x2="-28" y2="-126" stroke="#FFD700" stroke-width="1.5"/>
+    <line x1="-31" y1="-131" x2="-25" y2="-131" stroke="#FFD700" stroke-width="1.5"/>
+  </svg>`,92,245);
+
+  makeSVGSprite('church1',`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-40 -200 80 205">
+    <rect x="-38" y="-5"  width="76" height="5" rx="1" fill="#C0C0C0"/>
+    <rect x="-34" y="-10" width="68" height="5" rx="1" fill="#D0D0D0"/>
+    <rect x="-32" y="-90" width="64" height="90" fill="#F2F2F2"/>
+    <rect x="-28" y="-92" width="5" height="92" fill="#E4E4E4"/>
+    <rect x="-10" y="-92" width="5" height="92" fill="#E4E4E4"/>
+    <rect x="5"   y="-92" width="5" height="92" fill="#E4E4E4"/>
+    <rect x="23"  y="-92" width="5" height="92" fill="#E4E4E4"/>
+    <rect x="-34" y="-93" width="68" height="5" rx="1" fill="#DCDCDC"/>
+    <rect x="-23" y="-70" width="12" height="20" fill="rgba(160,205,240,.78)"/>
+    <path d="M-23,-70 A6,6 0 0,1 -11,-70" fill="rgba(160,205,240,.78)"/>
+    <rect x="-6"  y="-70" width="12" height="20" fill="rgba(160,205,240,.78)"/>
+    <path d="M-6,-70 A6,6 0 0,1 6,-70" fill="rgba(160,205,240,.78)"/>
+    <rect x="11"  y="-70" width="12" height="20" fill="rgba(160,205,240,.78)"/>
+    <path d="M11,-70 A6,6 0 0,1 23,-70" fill="rgba(160,205,240,.78)"/>
+    <polygon points="-34,-90 34,-90 34,-104 0,-122 -34,-104" fill="#2E7D32"/>
+    <line x1="0" y1="-104" x2="0" y2="-122" stroke="#1B5E20" stroke-width="1.5"/>
+    <rect x="-13" y="-162" width="26" height="74" fill="#EBEBEB"/>
+    <rect x="-11" y="-164" width="5" height="76" fill="#DCDCDC"/>
+    <rect x="6"   y="-164" width="5" height="76" fill="#DCDCDC"/>
+    <rect x="-9" y="-152" width="8" height="14" fill="rgba(10,5,5,.45)" rx="1"/>
+    <path d="M-9,-152 A4,4 0 0,1 -1,-152" fill="rgba(10,5,5,.45)"/>
+    <rect x="1"  y="-152" width="8" height="14" fill="rgba(10,5,5,.45)" rx="1"/>
+    <path d="M1,-152 A4,4 0 0,1 9,-152" fill="rgba(10,5,5,.45)"/>
+    <polygon points="-14,-160 0,-192 14,-160" fill="#2E7D32"/>
+    <line x1="-11" y1="-166" x2="0" y2="-192" stroke="#1B5E20" stroke-width="1"/>
+    <line x1="11"  y1="-166" x2="0" y2="-192" stroke="#1B5E20" stroke-width="1"/>
+    <line x1="0" y1="-195" x2="0" y2="-183" stroke="#FFD700" stroke-width="2.5"/>
+    <line x1="-5" y1="-191" x2="5" y2="-191" stroke="#FFD700" stroke-width="2.5"/>
+    <ellipse cx="0" cy="-126" rx="14" ry="9"  fill="#2E873A"/>
+    <ellipse cx="0" cy="-132" rx="10" ry="12" fill="#2E873A"/>
+    <ellipse cx="-3" cy="-138" rx="4" ry="5"  fill="rgba(255,255,255,.22)"/>
+    <line x1="0" y1="-146" x2="0" y2="-136" stroke="#FFD700" stroke-width="2"/>
+    <line x1="-4" y1="-143" x2="4" y2="-143" stroke="#FFD700" stroke-width="2"/>
+    <ellipse cx="-22" cy="-97" rx="9"  ry="6"  fill="#388E3C"/>
+    <ellipse cx="-22" cy="-102" rx="7" ry="8"  fill="#388E3C"/>
+    <line x1="-22" y1="-112" x2="-22" y2="-104" stroke="#FFD700" stroke-width="1.5"/>
+    <line x1="-25" y1="-109" x2="-19" y2="-109" stroke="#FFD700" stroke-width="1.5"/>
+    <ellipse cx="22" cy="-97" rx="9"  ry="6"  fill="#388E3C"/>
+    <ellipse cx="22" cy="-102" rx="7" ry="8"  fill="#388E3C"/>
+    <line x1="22" y1="-112" x2="22" y2="-104" stroke="#FFD700" stroke-width="1.5"/>
+    <line x1="19" y1="-109" x2="25" y2="-109" stroke="#FFD700" stroke-width="1.5"/>
+  </svg>`,80,205);
+
+  makeSVGSprite('church2',`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -190 100 195">
+    <rect x="-46" y="-5"  width="92" height="5"  rx="1" fill="#B090A0"/>
+    <rect x="-42" y="-12" width="84" height="7"  rx="1" fill="#C0A0B0"/>
+    <rect x="-42" y="-115" width="84" height="115" fill="#E8A0B0"/>
+    <rect x="-38" y="-117" width="5" height="117" fill="#D890A0"/>
+    <rect x="-20" y="-117" width="5" height="117" fill="#D890A0"/>
+    <rect x="-2"  y="-117" width="5" height="117" fill="#D890A0"/>
+    <rect x="16"  y="-117" width="5" height="117" fill="#D890A0"/>
+    <rect x="34"  y="-117" width="5" height="117" fill="#D890A0"/>
+    <path d="M-42,-115 A8,12 0 0,0 -26,-115" fill="#D890A0"/>
+    <path d="M-24,-115 A8,12 0 0,0 -8,-115"  fill="#D890A0"/>
+    <path d="M-6,-115  A8,12 0 0,0 10,-115"  fill="#D890A0"/>
+    <path d="M12,-115  A8,12 0 0,0 28,-115"  fill="#D890A0"/>
+    <path d="M30,-115  A8,12 0 0,0 42,-115"  fill="#D890A0"/>
+    <rect x="-34" y="-80" width="14" height="24" fill="rgba(160,205,240,.72)"/>
+    <path d="M-34,-80 A7,7 0 0,1 -20,-80" fill="rgba(160,205,240,.72)"/>
+    <rect x="-7"  y="-80" width="14" height="24" fill="rgba(160,205,240,.72)"/>
+    <path d="M-7,-80 A7,7 0 0,1 7,-80"   fill="rgba(160,205,240,.72)"/>
+    <rect x="20"  y="-80" width="14" height="24" fill="rgba(160,205,240,.72)"/>
+    <path d="M20,-80 A7,7 0 0,1 34,-80"   fill="rgba(160,205,240,.72)"/>
+    <circle cx="0" cy="-95" r="8" fill="rgba(160,205,240,.7)" stroke="#C880A0" stroke-width="1.5"/>
+    <rect x="-14" y="-28" width="28" height="28" fill="#D070A0"/>
+    <path d="M-14,-28 A14,14 0 0,1 14,-28" fill="#D070A0"/>
+    <rect x="-10" y="-28" width="20" height="28" fill="rgba(10,5,5,.65)"/>
+    <path d="M-10,-28 A10,10 0 0,1 10,-28" fill="rgba(10,5,5,.65)"/>
+    <rect x="-14" y="-158" width="28" height="46" fill="#D8D0D0"/>
+    <ellipse cx="0"   cy="-160" rx="16" ry="10" fill="#C8920A"/>
+    <ellipse cx="0"   cy="-167" rx="12" ry="14" fill="#C8920A"/>
+    <ellipse cx="-4"  cy="-175" rx="4"  ry="6"  fill="rgba(255,255,255,.22)"/>
+    <line x1="0" y1="-183" x2="0" y2="-172" stroke="#FFD700" stroke-width="2.5"/>
+    <line x1="-5" y1="-180" x2="5" y2="-180" stroke="#FFD700" stroke-width="2.5"/>
+    <line x1="-3" y1="-177" x2="3" y2="-177" stroke="#FFD700" stroke-width="1.5"/>
+    <ellipse cx="-28" cy="-122" rx="10" ry="7"  fill="#B8820A"/>
+    <ellipse cx="-28" cy="-128" rx="8"  ry="10" fill="#B8820A"/>
+    <line x1="-28" y1="-140" x2="-28" y2="-130" stroke="#FFD700" stroke-width="2"/>
+    <line x1="-32" y1="-137" x2="-24" y2="-137" stroke="#FFD700" stroke-width="2"/>
+    <ellipse cx="28" cy="-122" rx="10" ry="7"  fill="#B8820A"/>
+    <ellipse cx="28" cy="-128" rx="8"  ry="10" fill="#B8820A"/>
+    <line x1="28" y1="-140" x2="28" y2="-130" stroke="#FFD700" stroke-width="2"/>
+    <line x1="24" y1="-137" x2="32" y2="-137" stroke="#FFD700" stroke-width="2"/>
+    <ellipse cx="-16" cy="-130" rx="8" ry="5"  fill="#A87200"/>
+    <ellipse cx="-16" cy="-135" rx="6" ry="8"  fill="#A87200"/>
+    <line x1="-16" y1="-145" x2="-16" y2="-137" stroke="#FFD700" stroke-width="1.5"/>
+    <line x1="-19" y1="-142" x2="-13" y2="-142" stroke="#FFD700" stroke-width="1.5"/>
+    <ellipse cx="16" cy="-130" rx="8" ry="5"  fill="#A87200"/>
+    <ellipse cx="16" cy="-135" rx="6" ry="8"  fill="#A87200"/>
+    <line x1="16" y1="-145" x2="16" y2="-137" stroke="#FFD700" stroke-width="1.5"/>
+    <line x1="13" y1="-142" x2="19" y2="-142" stroke="#FFD700" stroke-width="1.5"/>
+  </svg>`,100,195);
+}
+
 // ── init ──────────────────────────────────────────────
-function initStars(){
-  stars=[];for(let i=0;i<80;i++)stars.push({x:rnd(0,W),y:rnd(0,H*.6),r:rnd(.4,2),t:rnd(0,6.28)});
-}
-function initClouds(){
-  clouds=[];for(let i=0;i<8;i++)clouds.push({x:rnd(0,W),y:rnd(15,H*.28),rx:rnd(30,70),ry:rnd(14,28),spd:rnd(.2,.5),a:rnd(.55,.9)});
-}
+function initStars(){stars=[];for(let i=0;i<80;i++)stars.push({x:rnd(0,W),y:rnd(0,H*.6),r:rnd(.4,2),t:rnd(0,6.28)});}
+function initClouds(){clouds=[];for(let i=0;i<8;i++)clouds.push({x:rnd(0,W),y:rnd(15,H*.28),rx:rnd(30,70),ry:rnd(14,28),spd:rnd(.2,.5),a:rnd(.55,.9)});}
 function initBgDecor(){
   bgD=[];const by=H-50;
   if(locIdx===0){
     bgD.push({t:'stela',x:rnd(W*.55,W*.82),y:by});
-    bgD.push({t:'church',x:rnd(W*.08,W*.40),y:by,s:0});
+    bgD.push({t:'church',x:rnd(W*.08,W*.42),y:by,s:0});
     bgD.push({t:'church',x:rnd(W*.48,W*.88),y:by,s:1});
   } else if(locIdx===1){
     for(let i=0;i<3;i++)bgD.push({t:'church',x:rnd(W*.05,W*.95),y:by,s:i%3});
@@ -105,7 +387,7 @@ function initBgBuildings(){
   initBgDecor();
 }
 
-// ── sky ───────────────────────────────────────────────
+// ── draw helpers ──────────────────────────────────────
 function dSky(){
   const c=TIMES[timeIdx].sky,g=ctx.createLinearGradient(0,0,0,H);
   g.addColorStop(0,c[0]);g.addColorStop(.4,c[1]);g.addColorStop(.75,c[2]);g.addColorStop(1,c[3]);
@@ -127,44 +409,6 @@ function dCloud(c){
   ctx.beginPath();ctx.ellipse(c.x-c.rx*.4,c.y+4,c.rx*.6,c.ry*.7,0,0,6.28);ctx.fill();
   ctx.beginPath();ctx.ellipse(c.x+c.rx*.4,c.y+3,c.rx*.62,c.ry*.6,0,0,6.28);ctx.fill();
 }
-
-// ── storm cloud obstacle ──────────────────────────────
-function dStormCloud(s){
-  s.flash=(s.flash||0);
-  if(Math.random()<.04)s.flash=6;
-  if(s.flash>0)s.flash--;
-  // dark body
-  const alpha=s.flash>0?0.95:0.82;
-  ctx.fillStyle=`rgba(40,38,55,${alpha})`;
-  ctx.beginPath();ctx.ellipse(s.x,s.y,s.rx,s.ry,0,0,6.28);ctx.fill();
-  ctx.beginPath();ctx.ellipse(s.x-s.rx*.42,s.y+5,s.rx*.6,s.ry*.75,0,0,6.28);ctx.fill();
-  ctx.beginPath();ctx.ellipse(s.x+s.rx*.42,s.y+4,s.rx*.62,s.ry*.7,0,0,6.28);ctx.fill();
-  // lighter top highlight
-  ctx.fillStyle='rgba(80,78,100,.5)';
-  ctx.beginPath();ctx.ellipse(s.x-s.rx*.1,s.y-s.ry*.3,s.rx*.7,s.ry*.45,0,0,6.28);ctx.fill();
-  // lightning bolt
-  if(s.flash>0){
-    ctx.strokeStyle='rgba(255,240,80,.95)';ctx.lineWidth=2;
-    ctx.beginPath();
-    ctx.moveTo(s.x+rnd(-10,10),s.y+s.ry);
-    ctx.lineTo(s.x+rnd(-15,15),s.y+s.ry+25);
-    ctx.lineTo(s.x+rnd(-5,5),s.y+s.ry+25);
-    ctx.lineTo(s.x+rnd(-20,20),s.y+s.ry+50);
-    ctx.stroke();
-    // glow around cloud
-    ctx.globalAlpha=.18;ctx.fillStyle='#FFE040';
-    ctx.beginPath();ctx.ellipse(s.x,s.y,s.rx+15,s.ry+15,0,0,6.28);ctx.fill();
-    ctx.globalAlpha=1;
-  }
-  // rain streaks
-  ctx.strokeStyle='rgba(120,140,200,.5)';ctx.lineWidth=1;
-  for(let i=0;i<6;i++){
-    const rx=s.x-s.rx*.7+i*(s.rx*1.4/5);
-    const ry=s.y+s.ry+rnd(0,8);
-    ctx.beginPath();ctx.moveTo(rx,ry);ctx.lineTo(rx-3,ry+14);ctx.stroke();
-  }
-}
-
 function dGround(){
   const n=timeIdx===3;
   const g=locIdx===0?(n?{m:'#2A4A1A',d:'#1A3A0A',l:'#3A5A2A'}:{m:'#5A8A3C',d:'#4A7A2C',l:'#6AAA4A'})
@@ -176,38 +420,15 @@ function dGround(){
   for(let i=0;i<nc;i++){const gx=(i*71+scrollX*.3)%W;ctx.fillStyle=g.l;ctx.beginPath();ctx.ellipse(gx,H-50,10,5,0,0,6.28);ctx.fill();}
 }
 
-// ── landmarks ─────────────────────────────────────────
-function dDome(x,y,r,col,cc,shine){
-  // main dome shape
-  ctx.fillStyle=col;
-  ctx.beginPath();ctx.arc(x,y,r,Math.PI,0);ctx.fill();
-  // onion bulge
-  ctx.beginPath();ctx.ellipse(x,y-r*.45,r*.62,r*.78,0,0,6.28);ctx.fill();
-  // shine highlight
-  if(shine){
-    ctx.fillStyle='rgba(255,255,255,.25)';
-    ctx.beginPath();ctx.ellipse(x-r*.22,y-r*.55,r*.28,r*.38,-.5,0,6.28);ctx.fill();
-  }
-  // cross
-  ctx.strokeStyle=cc;ctx.lineWidth=Math.max(1.5,r*.3);
-  ctx.beginPath();ctx.moveTo(x,y-r*1.38);ctx.lineTo(x,y-r*.3);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(x-r*.55,y-r*.92);ctx.lineTo(x+r*.55,y-r*.92);ctx.stroke();
-  // small crossbar
-  ctx.beginPath();ctx.moveTo(x-r*.3,y-r*.65);ctx.lineTo(x+r*.3,y-r*.65);ctx.stroke();
-}
-function dWindow(x,y,w,h,col){
-  ctx.fillStyle=col||'rgba(180,215,255,.75)';
-  ctx.beginPath();ctx.roundRect(x-w/2,y-h/2,w,h,w/2);ctx.fill();
-  ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=1;ctx.stroke();
-}
-function dArch(x,y,w,h,col){
-  ctx.fillStyle=col||'rgba(180,215,255,.75)';
-  ctx.beginPath();ctx.moveTo(x-w/2,y);ctx.lineTo(x-w/2,y-h*.5);ctx.arc(x,y-h*.5,w/2,Math.PI,0);ctx.lineTo(x+w/2,y);ctx.closePath();ctx.fill();
-  ctx.strokeStyle='rgba(0,0,0,.2)';ctx.lineWidth=1;ctx.stroke();
+// ── draw sprite scaled ────────────────────────────────
+function dSpr(key,cx,cy,tw,th){
+  const s=SPR[key];if(!s)return;
+  ctx.drawImage(s,cx-tw/2,cy-th,tw,th);
 }
 
+// ── landmarks (fallback code draw if sprite not ready) ─
 function dStela(x,y){
-  ctx.save();ctx.translate(x,y);const s=.6;
+  ctx.save();ctx.translate(x,y);const s=.55;
   ctx.fillStyle='#C0B8A8';
   ctx.fillRect(-11*s,-112*s,22*s,112*s);ctx.fillRect(-17*s,-182*s,34*s,74*s);
   ctx.fillRect(-26*s,-196*s,52*s,18*s);
@@ -220,146 +441,21 @@ function dStela(x,y){
   ctx.fillStyle='#A49070';for(let i=0;i<4;i++)ctx.fillRect(-13*s,(-166+i*18)*s,26*s,7*s);
   ctx.restore();
 }
-
-// Beautiful church style 0 — red brick with tall bell tower (Kungur)
-function dChurch0(x,y){
-  ctx.save();ctx.translate(x,y);
-  // main nave
-  ctx.fillStyle='#9B3528';ctx.fillRect(-38,-95,76,95);
-  // brick texture lines
-  ctx.strokeStyle='rgba(0,0,0,.12)';ctx.lineWidth=1;
-  for(let yy=-90;yy<0;yy+=8){ctx.beginPath();ctx.moveTo(-38,yy);ctx.lineTo(38,yy);ctx.stroke();}
-  for(let xx=-32;xx<38;xx+=12){ctx.beginPath();ctx.moveTo(xx,-95);ctx.lineTo(xx,0);ctx.stroke();}
-  // arched windows on nave
-  dArch(-18,-52,12,18,'rgba(180,215,255,.7)');dArch(0,-52,12,18,'rgba(180,215,255,.7)');dArch(18,-52,12,18,'rgba(180,215,255,.7)');
-  // cornice
-  ctx.fillStyle='#C4453A';ctx.fillRect(-40,-97,80,6);
-  // apse (rounded back)
-  ctx.fillStyle='#9B3528';ctx.beginPath();ctx.ellipse(-44,-50,12,42,0,0,6.28);ctx.fill();
-  // bell tower
-  ctx.fillStyle='#8A2E1E';ctx.fillRect(-14,-175,28,82);
-  // tower brick
-  ctx.strokeStyle='rgba(0,0,0,.1)';ctx.lineWidth=1;
-  for(let yy=-170;yy<-95;yy+=8){ctx.beginPath();ctx.moveTo(-14,yy);ctx.lineTo(14,yy);ctx.stroke();}
-  // belfry arches
-  ctx.fillStyle='#7A2818';ctx.fillRect(-16,-192,32,20);
-  dArch(-6,-188,10,14,'rgba(20,10,5,.6)');dArch(6,-188,10,14,'rgba(20,10,5,.6)');
-  // octagonal top of tower
-  ctx.fillStyle='#6A2010';
-  ctx.beginPath();for(let a=0;a<8;a++){const ag=a/8*6.28-Math.PI/8;ctx.lineTo(Math.cos(ag)*14,Math.sin(ag)*10-202);}ctx.closePath();ctx.fill();
-  // tent roof / spire
-  ctx.fillStyle='#5A1A0A';ctx.beginPath();ctx.moveTo(-12,-210);ctx.lineTo(0,-248);ctx.lineTo(12,-210);ctx.closePath();ctx.fill();
-  dDome(0,-248,0,'','#FFD700',false); // just the cross
-  ctx.strokeStyle='#FFD700';ctx.lineWidth=2;
-  ctx.beginPath();ctx.moveTo(0,-250);ctx.lineTo(0,-238);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(-5,-246);ctx.lineTo(5,-246);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(-3,-242);ctx.lineTo(3,-242);ctx.stroke();
-  // side dome
-  dDome(-26,-98,11,'#2E7D32','#FFD700',true);
-  ctx.restore();
-}
-
-// Style 1 — white church with green roof & gold domes (Perm region)
-function dChurch1(x,y){
-  ctx.save();ctx.translate(x,y);
-  // foundation
-  ctx.fillStyle='#DCDCDC';ctx.fillRect(-35,-8,70,8);
-  // main body
-  ctx.fillStyle='#F0F0F0';ctx.fillRect(-32,-82,64,82);
-  // pilasters (columns on facade)
-  ctx.fillStyle='#E0E0E0';
-  [-24,-8,8,24].forEach(px=>{ctx.fillRect(px-3,-84,6,84);});
-  // arched windows
-  dArch(-20,-55,12,22,'rgba(160,200,240,.8)');dArch(0,-55,12,22,'rgba(160,200,240,.8)');dArch(20,-55,12,22,'rgba(160,200,240,.8)');
-  // cornice
-  ctx.fillStyle='#D8D8D8';ctx.fillRect(-34,-84,68,5);
-  // green hip roof
-  ctx.fillStyle='#2E7D32';ctx.beginPath();ctx.moveTo(-36,-82);ctx.lineTo(-36,-100);ctx.lineTo(0,-118);ctx.lineTo(36,-100);ctx.lineTo(36,-82);ctx.closePath();ctx.fill();
-  // roof ridge
-  ctx.strokeStyle='#1B5E20';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,-100);ctx.lineTo(0,-118);ctx.stroke();
-  // bell tower
-  ctx.fillStyle='#EBEBEB';ctx.fillRect(-12,-152,24,70);
-  [-8,8].forEach(px=>{ctx.fillStyle='#DCDCDC';ctx.fillRect(px-2,-154,4,72);});
-  dArch(-6,-140,10,16,'rgba(20,10,5,.5)');dArch(6,-140,10,16,'rgba(20,10,5,.5)');
-  // tower green spire
-  ctx.fillStyle='#2E7D32';ctx.beginPath();ctx.moveTo(-13,-150);ctx.lineTo(0,-185);ctx.lineTo(13,-150);ctx.closePath();ctx.fill();
-  ctx.strokeStyle='#1B5E20';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(-10,-158);ctx.lineTo(0,-185);ctx.lineTo(10,-158);ctx.stroke();
-  // domes
-  dDome(0,-120,14,'#2E873A','#FFD700',true);
-  dDome(-22,-85,9,'#388E3C','#FFD700',true);dDome(22,-85,9,'#388E3C','#FFD700',true);
-  // cross on spire
-  ctx.strokeStyle='#FFD700';ctx.lineWidth=2;
-  ctx.beginPath();ctx.moveTo(0,-188);ctx.lineTo(0,-176);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(-4,-184);ctx.lineTo(4,-184);ctx.stroke();
-  ctx.restore();
-}
-
-// Style 2 — ornate pink cathedral with 5 gold domes (Perm city)
-function dChurch2(x,y){
-  ctx.save();ctx.translate(x,y);
-  // foundation steps
-  ctx.fillStyle='#C0A0A8';ctx.fillRect(-46,-8,92,8);
-  ctx.fillStyle='#D0B0B8';ctx.fillRect(-42,-14,84,8);
-  // main body
-  ctx.fillStyle='#E8A0B0';ctx.fillRect(-44,-108,88,108);
-  // vertical pilasters
-  ctx.fillStyle='#D890A0';
-  [-36,-18,0,18,36].forEach(px=>{ctx.fillRect(px-3,-110,6,110);});
-  // kokoshniks (decorative arches on top)
-  ctx.fillStyle='#D890A0';
-  for(let i=-3;i<=3;i++){ctx.beginPath();ctx.ellipse(i*14,-108,8,12,0,0,Math.PI,true);ctx.fill();}
-  // tall arched windows x3
-  dArch(-22,-62,14,26,'rgba(160,200,240,.75)');dArch(0,-62,14,26,'rgba(160,200,240,.75)');dArch(22,-62,14,26,'rgba(160,200,240,.75)');
-  // round window (rose window)
-  dWindow(0,-88,12,12,'rgba(180,215,255,.7)');
-  // portal
-  ctx.fillStyle='#C880A0';
-  ctx.beginPath();ctx.moveTo(-16,0);ctx.lineTo(-16,-18);ctx.arc(0,-18,16,Math.PI,0);ctx.lineTo(16,0);ctx.closePath();ctx.fill();
-  ctx.fillStyle='rgba(10,5,5,.7)';ctx.fillRect(-11,-18,22,18);
-  ctx.beginPath();ctx.arc(0,-18,11,Math.PI,0);ctx.fill();
-  // drum for central dome
-  ctx.fillStyle='#D8D0D0';ctx.fillRect(-14,-148,28,44);
-  // windows on drum
-  dArch(-8,-132,8,12,'rgba(160,200,240,.65)');dArch(8,-132,8,12,'rgba(160,200,240,.65)');
-  // 5 golden domes
-  dDome(0,-150,18,'#C8920A','#FFD700',true);
-  dDome(-30,-115,10,'#B8820A','#FFD700',true);dDome(30,-115,10,'#B8820A','#FFD700',true);
-  dDome(-18,-122,9,'#A87200','#FFD700',true);dDome(18,-122,9,'#A87200','#FFD700',true);
-  ctx.restore();
-}
-
 function dKremlin(x,y){
   ctx.save();ctx.translate(x,y);
-  // main tower
-  ctx.fillStyle='#8B1A1A';ctx.fillRect(-24,-168,48,168);
-  // brick lines
-  ctx.strokeStyle='rgba(0,0,0,.1)';ctx.lineWidth=1;
-  for(let yy=-160;yy<0;yy+=10){ctx.beginPath();ctx.moveTo(-24,yy);ctx.lineTo(24,yy);ctx.stroke();}
-  // merlons (battlements)
-  ctx.fillStyle='#7A1515';
-  for(let i=-20;i<=20;i+=10)ctx.fillRect(i,-182,7,18);
-  // upper part
-  ctx.fillStyle='#6A1010';ctx.fillRect(-15,-208,30,44);
-  for(let i=-12;i<=12;i+=8)ctx.fillRect(i,-216,5,12);
-  // ruby star spire
-  ctx.fillStyle='#1A1A1A';ctx.beginPath();ctx.moveTo(-10,-208);ctx.lineTo(0,-260);ctx.lineTo(10,-208);ctx.closePath();ctx.fill();
-  ctx.fillStyle='#CC0000';
-  // star shape
-  for(let a=0;a<5;a++){
-    const ag=a/5*6.28-Math.PI/2;const ag2=(a+.5)/5*6.28-Math.PI/2;
-    ctx.beginPath();ctx.moveTo(0,-264);ctx.lineTo(Math.cos(ag)*8,-264+Math.sin(ag)*8);ctx.lineTo(Math.cos(ag2)*4,-264+Math.sin(ag2)*4);ctx.closePath();ctx.fill();
-  }
-  // clock face
-  ctx.fillStyle='#FFFDE7';ctx.beginPath();ctx.arc(0,-144,15,0,6.28);ctx.fill();
-  ctx.strokeStyle='#333';ctx.lineWidth=1.5;ctx.stroke();
+  ctx.fillStyle='#881818';ctx.fillRect(-22,-160,44,160);
+  ctx.fillStyle='#781010';for(let i=-18;i<=18;i+=9)ctx.fillRect(i,-172,6,16);
+  ctx.fillStyle='#681010';ctx.fillRect(-13,-200,26,42);
+  ctx.fillStyle='#181818';ctx.beginPath();ctx.moveTo(-9,-200);ctx.lineTo(0,-250);ctx.lineTo(9,-200);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#FF1818';ctx.font='14px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('★',0,-254);
+  ctx.fillStyle='#FFF';ctx.beginPath();ctx.arc(0,-140,12,0,6.28);ctx.fill();
+  ctx.strokeStyle='#444';ctx.lineWidth=1.5;ctx.stroke();
   ctx.strokeStyle='#222';ctx.lineWidth=2;
-  ctx.beginPath();ctx.moveTo(0,-144);ctx.lineTo(5,-135);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(0,-144);ctx.lineTo(-6,-138);ctx.stroke();
-  // arch gate
-  ctx.fillStyle='#111';ctx.beginPath();ctx.ellipse(0,-14,11,15,0,Math.PI,0);ctx.fill();ctx.fillRect(-11,-14,22,15);
+  ctx.beginPath();ctx.moveTo(0,-140);ctx.lineTo(4,-132);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(0,-140);ctx.lineTo(-5,-134);ctx.stroke();
+  ctx.fillStyle='#111';ctx.beginPath();ctx.ellipse(0,-12,10,14,0,Math.PI,0);ctx.fill();ctx.fillRect(-10,-12,20,14);
   ctx.restore();
 }
-
 function dBgBuildings(){
   bgB.forEach(b=>{
     b.x-=spd*.12;if(b.x<-b.w)b.x=W+b.w;
@@ -375,90 +471,59 @@ function dBgBuildings(){
     d.x-=spd*.09;if(d.x<-160)d.x=W+160;
     if(d.t==='stela')dStela(d.x,d.y);
     else if(d.t==='kremlin')dKremlin(d.x,d.y);
-    else if(d.s===0)dChurch0(d.x,d.y);
-    else if(d.s===1)dChurch1(d.x,d.y);
-    else dChurch2(d.x,d.y);
+    else{
+      const key='church'+d.s;
+      const sizes=[[92,245],[80,205],[100,195]];
+      const [sw,sh]=sizes[d.s];
+      const scale=Math.min(1,H*.45/sh);
+      dSpr(key,d.x,d.y,sw*scale,sh*scale);
+    }
   });
 }
 
-// ── balloon — Perm region flag colors ─────────────────
+// ── balloon ───────────────────────────────────────────
 function dBalloon(bx,by,flame){
   const rv=R_VIS(),wb=Math.sin(fr*.06)*1.4,cy=by+wb;
-
-  // ropes
-  ctx.strokeStyle='rgba(0,0,0,.35)';ctx.lineWidth=Math.max(1.5,rv*.05);
-  ctx.beginPath();ctx.moveTo(bx-rv*.4,cy+rv*.78);ctx.lineTo(bx-rv*.3,cy+rv+rv*.6);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(bx+rv*.4,cy+rv*.78);ctx.lineTo(bx+rv*.3,cy+rv+rv*.6);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(bx-rv*.15,cy+rv*.88);ctx.lineTo(bx-rv*.22,cy+rv+rv*.6);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(bx+rv*.15,cy+rv*.88);ctx.lineTo(bx+rv*.22,cy+rv+rv*.6);ctx.stroke();
-
-  // basket — wicker style
-  const bkw=rv*.75,bkh=rv*.55,bkx=bx-bkw/2,bky=cy+rv+rv*.55;
-  ctx.fillStyle='#8B6914';
-  ctx.beginPath();ctx.roundRect(bkx,bky,bkw,bkh,rv*.1);ctx.fill();
-  ctx.strokeStyle='#6B4F10';ctx.lineWidth=1.5;ctx.stroke();
-  // wicker lines
-  ctx.strokeStyle='rgba(0,0,0,.2)';ctx.lineWidth=1;
-  for(let wx=bkx+bkw/4;wx<bkx+bkw;wx+=bkw/4){ctx.beginPath();ctx.moveTo(wx,bky);ctx.lineTo(wx,bky+bkh);ctx.stroke();}
-  ctx.beginPath();ctx.moveTo(bkx,bky+bkh/2);ctx.lineTo(bkx+bkw,bky+bkh/2);ctx.stroke();
-  // burner glow at basket top
-  if(flame){
-    ctx.fillStyle='rgba(255,160,30,.6)';ctx.beginPath();ctx.ellipse(bx,bky,rv*.25,rv*.12,0,0,6.28);ctx.fill();
+  // draw sprite (160x200 viewBox scaled to rv*2 wide)
+  const scale=(rv*2)/160;
+  const sw=160*scale,sh=200*scale;
+  // balloon origin in SVG is center of sphere at (0,0), basket ends at y=133
+  // we want sphere center at cy, so top = cy - 92*scale
+  if(SPR.balloon){
+    ctx.drawImage(SPR.balloon, bx-sw/2, cy-92*scale, sw, sh);
   }
-
-  // flame shooting up inside envelope
+  // flame inside balloon
   if(flame){
-    const fl=rv*.35+Math.sin(fr*.28)*rv*.12,jit=Math.sin(fr*.7)*rv*.06;
-    ctx.save();ctx.beginPath();ctx.ellipse(bx,cy,rv*.95,rv*.98,0,0,6.28);ctx.clip();
-    ctx.fillStyle='rgba(255,100,0,.88)';ctx.beginPath();ctx.ellipse(bx+jit,cy+rv*.5,rv*.18,fl,0,0,6.28);ctx.fill();
-    ctx.fillStyle='rgba(255,200,20,.82)';ctx.beginPath();ctx.ellipse(bx+jit*.5,cy+rv*.62,rv*.1,fl*.55,0,0,6.28);ctx.fill();
+    const t=fr*.08;
+    const jit1=Math.sin(t*1.7)*rv*.08,jit2=Math.sin(t*2.3+1)*rv*.06;
+    ctx.save();
+    ctx.beginPath();ctx.ellipse(bx,cy,rv*.9,rv*.95,0,0,6.28);ctx.clip();
+    ctx.fillStyle='rgba(255,80,0,.78)';
+    ctx.beginPath();
+    ctx.moveTo(bx-rv*.2,cy+rv*.65);
+    ctx.quadraticCurveTo(bx-rv*.25+jit1,cy+rv*.2,bx+jit1*.5,cy+rv*.1);
+    ctx.quadraticCurveTo(bx+rv*.25+jit2,cy+rv*.2,bx+rv*.2,cy+rv*.65);
+    ctx.closePath();ctx.fill();
+    ctx.fillStyle='rgba(255,150,0,.88)';
+    ctx.beginPath();
+    ctx.moveTo(bx-rv*.13,cy+rv*.62);
+    ctx.quadraticCurveTo(bx-rv*.15+jit2,cy+rv*.28,bx+jit2*.3,cy+rv*.16);
+    ctx.quadraticCurveTo(bx+rv*.15+jit1,cy+rv*.28,bx+rv*.13,cy+rv*.62);
+    ctx.closePath();ctx.fill();
+    ctx.fillStyle='rgba(255,220,30,.92)';
+    ctx.beginPath();
+    ctx.moveTo(bx-rv*.07,cy+rv*.58);
+    ctx.quadraticCurveTo(bx+jit1*.2,cy+rv*.35,bx+rv*.07,cy+rv*.58);
+    ctx.closePath();ctx.fill();
+    // sparks
+    for(let i=0;i<4;i++){
+      const sx=bx+Math.sin(t*3+i*1.5)*rv*.18;
+      const sy=cy+rv*.18-i*rv*.07+Math.sin(t*2+i)*rv*.04;
+      ctx.fillStyle=`rgba(255,${180+Math.floor(Math.random()*75)},0,.8)`;
+      ctx.beginPath();ctx.arc(sx,sy,rv*.03,0,6.28);ctx.fill();
+    }
     ctx.restore();
   }
-
-  // ── Perm region balloon: vertical panels ──────────
-  // Colors: blue / white / red + coat of arms
-  ctx.save();
-  ctx.beginPath();ctx.ellipse(bx,cy,rv,rv,0,0,6.28);ctx.clip();
-
-  // 3 vertical color panels
-  const colors=['#003F87','#FFFFFF','#CC0000'];
-  const pw=rv*2/3;
-  colors.forEach((c,i)=>{ctx.fillStyle=c;ctx.fillRect(bx-rv+i*pw,cy-rv,pw+.5,rv*2);});
-
-  // seam lines between panels
-  ctx.strokeStyle='rgba(0,0,0,.2)';ctx.lineWidth=1;
-  ctx.beginPath();ctx.moveTo(bx-rv/3,cy-rv);ctx.lineTo(bx-rv/3,cy+rv);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(bx+rv/3,cy-rv);ctx.lineTo(bx+rv/3,cy+rv);ctx.stroke();
-
-  // vertical rib lines (gives 3D balloon feel)
-  ctx.strokeStyle='rgba(0,0,0,.12)';ctx.lineWidth=1.5;
-  [-rv*.65,-rv*.33,0,rv*.33,rv*.65].forEach(ox=>{
-    ctx.beginPath();ctx.moveTo(bx+ox,cy-rv);ctx.lineTo(bx+ox,cy+rv);ctx.stroke();
-  });
-
-  // roundness shading
-  const gr=ctx.createRadialGradient(bx-rv*.3,cy-rv*.3,rv*.05,bx,cy,rv);
-  gr.addColorStop(0,'rgba(255,255,255,.28)');gr.addColorStop(.45,'rgba(255,255,255,.05)');gr.addColorStop(1,'rgba(0,0,0,.30)');
-  ctx.fillStyle=gr;ctx.beginPath();ctx.ellipse(bx,cy,rv,rv,0,0,6.28);ctx.fill();
-
-  ctx.restore(); // end clip
-
-  // outline
-  ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(bx,cy,rv,rv,0,0,6.28);ctx.stroke();
-
-  // coat of arms badge (simplified bear on white background)
-  const badgeR=rv*.28;
-  ctx.fillStyle='rgba(255,255,255,.92)';
-  ctx.beginPath();ctx.ellipse(bx,cy,badgeR,badgeR*.85,0,0,6.28);ctx.fill();
-  ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=1;ctx.stroke();
-  // bear icon text
-  ctx.font=`${rv*.32}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
-  ctx.fillText('🐻',bx,cy+rv*.03);
-
-  // top & bottom caps
-  ctx.fillStyle='rgba(0,0,0,.4)';ctx.beginPath();ctx.ellipse(bx,cy-rv,rv*.3,rv*.08,0,0,6.28);ctx.fill();
-  ctx.beginPath();ctx.ellipse(bx,cy+rv,rv*.35,rv*.1,0,0,6.28);ctx.fill();
-
   // boosts glows
   if(inv>0){
     ctx.globalAlpha=(.4+Math.sin(fr*.18)*.4)*(inv/INV_MAX);
@@ -474,44 +539,58 @@ function dBalloon(bx,by,flame){
   }
   if(turbo>0){
     ctx.globalAlpha=.5+Math.sin(fr*.3)*.3;ctx.strokeStyle='#FFA030';ctx.lineWidth=3;
-    [-rv*.55,-rv*.15,rv*.2].forEach(oy=>{ctx.beginPath();ctx.moveTo(bx-rv-4,cy+oy);ctx.lineTo(bx-rv-rv*.7,cy+oy);ctx.stroke();});
+    [-rv*.5,-rv*.1,rv*.25].forEach(oy=>{ctx.beginPath();ctx.moveTo(bx-rv-4,cy+oy);ctx.lineTo(bx-rv-rv*.65,cy+oy);ctx.stroke();});
     ctx.globalAlpha=1;
   }
 }
 
 // ── tree ──────────────────────────────────────────────
 function dTree(o){
-  const tx=o.x,ty=o.y+o.h;
-  // trunk
-  ctx.fillStyle='#5C3310';ctx.fillRect(tx+o.w*.35,ty-o.h,o.w*.3,o.h);
-  // foliage layers
-  const layers=[
-    {off:0,col:'#1B5E20',f:.5},
-    {off:4,col:'#2E7D32',f:.72},
-    {off:2,col:'#388E3C',f:.88},
-    {off:1,col:'#43A047',f:1},
-  ];
-  layers.forEach(({off,col,f})=>{
-    ctx.fillStyle=col;
-    const py=ty-o.h*f;
-    ctx.beginPath();ctx.moveTo(tx-off,py+o.h*(1-f)+o.h*.12);ctx.lineTo(tx+o.w/2,py);ctx.lineTo(tx+o.w+off,py+o.h*(1-f)+o.h*.12);ctx.closePath();ctx.fill();
-  });
-  // snow on night/winter feel: skip for now
+  const treeKey='tree'+o.variant;
+  const srcW=[104,130,100][o.variant];
+  const srcH=[165,200,200][o.variant];
+  const scale=o.h/srcH;
+  dSpr(treeKey,o.x+o.w/2,o.y+o.h,o.w,o.h);
+  if(!SPR[treeKey]){
+    // fallback
+    ctx.fillStyle='#5C3310';ctx.fillRect(o.x+12,o.y,12,o.h);
+    ctx.fillStyle='#2E7D32';ctx.beginPath();ctx.moveTo(o.x,o.y+o.h*.4);ctx.lineTo(o.x+o.w/2,o.y);ctx.lineTo(o.x+o.w,o.y+o.h*.4);ctx.closePath();ctx.fill();
+  }
+}
+
+// ── storm cloud ───────────────────────────────────────
+function dStormCloud(s){
+  s.flash=(s.flash||0);if(Math.random()<.04)s.flash=6;if(s.flash>0)s.flash--;
+  const sw=s.rx*2,sh=s.ry*2+50;
+  if(SPR.storm){
+    ctx.save();
+    if(s.flash>0){ctx.globalAlpha=.88+s.flash*.02;}
+    ctx.drawImage(SPR.storm,s.x-sw/2,s.y-s.ry,sw,sh);
+    ctx.globalAlpha=1;ctx.restore();
+    if(s.flash>0){
+      ctx.globalAlpha=.15;ctx.fillStyle='#FFE040';
+      ctx.beginPath();ctx.ellipse(s.x,s.y,sw*.6,sh*.4,0,0,6.28);ctx.fill();
+      ctx.globalAlpha=1;
+    }
+  }
 }
 
 // ── bird ──────────────────────────────────────────────
 function dBird(b){
   b.wing+=b.wingDir*.14;if(b.wing>.5||b.wing<-.5)b.wingDir*=-1;
-  const col=timeIdx===3?'#9898B8':'#281808';
-  // body
-  ctx.fillStyle=col;ctx.beginPath();ctx.ellipse(b.x,b.y,7,4,0,0,6.28);ctx.fill();
-  // wings
-  ctx.strokeStyle=col;ctx.lineWidth=2.5;
-  ctx.beginPath();ctx.moveTo(b.x-16,b.y-b.wing*16);ctx.quadraticCurveTo(b.x-5,b.y+2,b.x,b.y);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(b.x+16,b.y-b.wing*16);ctx.quadraticCurveTo(b.x+5,b.y+2,b.x,b.y);ctx.stroke();
-  // tail
-  ctx.beginPath();ctx.moveTo(b.x+6,b.y);ctx.lineTo(b.x+14,b.y+4);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(b.x+6,b.y);ctx.lineTo(b.x+14,b.y-3);ctx.stroke();
+  const sc=1+b.wing*.15;
+  if(SPR.bird){
+    ctx.save();ctx.translate(b.x,b.y);
+    if(b.vx<0)ctx.scale(-1,1);
+    ctx.scale(1,sc);
+    ctx.drawImage(SPR.bird,-38,-14,76,28);
+    ctx.restore();
+  } else {
+    const col=timeIdx===3?'#9898B8':'#281808';
+    ctx.strokeStyle=col;ctx.lineWidth=2.5;
+    ctx.beginPath();ctx.moveTo(b.x-16,b.y-b.wing*16);ctx.quadraticCurveTo(b.x,b.y,b.x+16,b.y-b.wing*16);ctx.stroke();
+    ctx.fillStyle=col;ctx.beginPath();ctx.ellipse(b.x,b.y,6,4,0,0,6.28);ctx.fill();
+  }
   if(b.vx>0&&b.x>0&&b.x<bal.x+100&&b.x>bal.x-30){
     ctx.fillStyle='rgba(255,60,60,.85)';
     ctx.beginPath();ctx.moveTo(b.x-14,b.y-7);ctx.lineTo(b.x-24,b.y);ctx.lineTo(b.x-14,b.y+7);ctx.closePath();ctx.fill();
@@ -522,15 +601,7 @@ function dBird(b){
 function dPickup(p){
   p.pulse=(p.pulse+.08)%6.28;const sc=1+Math.sin(p.pulse)*.12;
   ctx.save();ctx.translate(p.x,p.y);ctx.scale(sc,sc);
-  const S={
-    gas:      ['#FFB300','#E65100','⛽'],
-    invincible:['rgba(90,170,255,.92)','#1555C0','🛡'],
-    life:     ['rgba(255,110,110,.92)','#C02020','❤️'],
-    speed:    ['rgba(170,110,255,.92)','#4A10A0','⚡'],
-    magnet:   ['rgba(255,80,160,.92)','#AA0060','🧲'],
-    tiny:     ['rgba(80,220,180,.92)','#006644','🫧'],
-    turbo:    ['rgba(255,160,30,.92)','#B04000','🚀'],
-  }[p.type]||['#aaa','#555','?'];
+  const S={gas:['#FFB300','#E65100','⛽'],invincible:['rgba(90,170,255,.92)','#1555C0','🛡'],life:['rgba(255,110,110,.92)','#C02020','❤️'],speed:['rgba(170,110,255,.92)','#4A10A0','⚡'],magnet:['rgba(255,80,160,.92)','#AA0060','🧲'],tiny:['rgba(80,220,180,.92)','#006644','🫧'],turbo:['rgba(255,160,30,.92)','#B04000','🚀']}[p.type]||['#aaa','#555','?'];
   ctx.fillStyle=S[0];ctx.strokeStyle=S[1];ctx.lineWidth=2;
   if(p.type==='gas'){ctx.beginPath();ctx.roundRect(-p.r,-p.r,p.r*2,p.r*2,5);ctx.fill();ctx.stroke();}
   else{ctx.beginPath();ctx.arc(0,0,p.r,0,6.28);ctx.fill();ctx.stroke();}
@@ -541,76 +612,43 @@ function dParts(){
   parts.forEach(p=>{ctx.globalAlpha=p.life;ctx.fillStyle=p.col;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.28);ctx.fill();});
   ctx.globalAlpha=1;
 }
+function updLives(){lvEl.innerHTML='';for(let i=0;i<3;i++){const s=document.createElement('span');s.textContent=i<lives?'❤️':'🖤';lvEl.appendChild(s);}}
+function addParts(x,y,cols,n=12){for(let i=0;i<n;i++){const a=rnd(0,6.28),sp=rnd(1.5,4);parts.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-1,life:1,r:rnd(3,6),col:cols[Math.floor(rnd(0,cols.length))]});}}
 
-// ── HUD ───────────────────────────────────────────────
-function updLives(){
-  lvEl.innerHTML='';
-  for(let i=0;i<3;i++){const s=document.createElement('span');s.textContent=i<lives?'❤️':'🖤';lvEl.appendChild(s);}
-}
-function addParts(x,y,cols,n=12){
-  for(let i=0;i<n;i++){
-    const a=rnd(0,6.28),sp=rnd(1.5,4);
-    parts.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-1,life:1,r:rnd(3,6),col:cols[Math.floor(rnd(0,cols.length))]});
-  }
-}
-
-// ── spawn ─────────────────────────────────────────────
 function spawnTree(){
-  // trees spawn high enough to be real obstacles — top 55-75% of screen
-  const h=rnd(H*.38,H*.58);
-  trees.push({x:W+30,y:H-50-h,w:44,h});
+  const h=rnd(H*.22,H*.38);
+  const variant=Math.floor(rnd(0,3));
+  const widths=[104,130,100];
+  const scale=h/[165,200,200][variant];
+  trees.push({x:W+30,y:H-50-h,w:widths[variant]*scale,h,variant});
 }
 function spawnPickup(){
   const T=['invincible','life','speed','magnet','tiny','turbo'];
   pkups.push({type:T[Math.floor(rnd(0,T.length))],x:W+30,y:rnd(H*.14,H*.62),r:15,pulse:0});
 }
-function spawnGas(){
-  pkups.push({type:'gas',x:W+30,y:rnd(H*.18,H*.62),r:16,pulse:0});
-}
+function spawnGas(){pkups.push({type:'gas',x:W+30,y:rnd(H*.18,H*.62),r:16,pulse:0});}
 function spawnStormCloud(){
-  const rx=rnd(65,110),ry=rnd(30,50);
-  const y=rnd(H*.1,H*.5);
-  stormClouds.push({x:W+rx+20,y,rx,ry,flash:0});
+  const rx=rnd(48,72),ry=rnd(22,36);
+  stormClouds.push({x:W+rx+20,y:rnd(H*.1,H*.48),rx,ry,flash:0});
 }
 function spawnBird(){
   const y=rnd(H*.1,H*.5);const dir=Math.random()<.5?1:-1;
   birds.push({x:dir===1?-40:W+40,y,vy:0,vx:rnd(1.8,3.2)*dir,wing:0,wingDir:1});
 }
 
-// ── die ───────────────────────────────────────────────
 function die(){
   if(inv>0||dieCD>0)return;
   lives--;updLives();
   addParts(bal.x,bal.y,['#E53935','#FFB300','#42A5F5'],18);
   dieCD=150;
   if(lives<=0){st='dead';}
-  else{
-    inv=INV_MAX;
-    gas=Math.max(gas,0.45);
-    bal.y=Math.min(bal.y,GY()-60);
-    bal.vy=-10;
-  }
+  else{inv=INV_MAX;gas=Math.max(gas,0.45);bal.y=Math.min(bal.y,GY()-60);bal.vy=-10;}
 }
 
-// ── collision ─────────────────────────────────────────
-function hitCircle(ox,oy,or){
-  const r=tiny>0?R_HIT()*.55:R_HIT();
-  return Math.hypot(bal.x-ox,bal.y-oy)<r+or;
-}
-function hitRect(rx,ry,rw,rh){
-  const r=tiny>0?R_HIT()*.55:R_HIT();
-  const nx=Math.max(rx,Math.min(bal.x,rx+rw));
-  const ny=Math.max(ry,Math.min(bal.y,ry+rh));
-  return Math.hypot(bal.x-nx,bal.y-ny)<r;
-}
-function hitEllipse(ox,oy,erx,ery){
-  // check if balloon center is inside/near the ellipse
-  const r=tiny>0?R_HIT()*.55:R_HIT();
-  const dx=(bal.x-ox)/(erx+r), dy=(bal.y-oy)/(ery+r);
-  return dx*dx+dy*dy<1;
-}
+function hitCircle(ox,oy,or){const r=tiny>0?R_HIT()*.55:R_HIT();return Math.hypot(bal.x-ox,bal.y-oy)<r+or;}
+function hitRect(rx,ry,rw,rh){const r=tiny>0?R_HIT()*.55:R_HIT();const nx=Math.max(rx,Math.min(bal.x,rx+rw));const ny=Math.max(ry,Math.min(bal.y,ry+rh));return Math.hypot(bal.x-nx,bal.y-ny)<r;}
+function hitEllipse(ox,oy,erx,ery){const r=tiny>0?R_HIT()*.55:R_HIT();const dx=(bal.x-ox)/(erx+r),dy=(bal.y-oy)/(ery+r);return dx*dx+dy*dy<1;}
 
-// ── update ────────────────────────────────────────────
 function update(){
   fr++;scrollX+=spd;score+=spd*.05;
   spd=Math.min(6,2.2+score*.007);
@@ -623,7 +661,6 @@ function update(){
   if(fr>240)hnEl.style.display='none';
 
   gas-=gasDecay;if(gas<0)gas=0;
-
   const lf=boost>0?LIFT_B:LIFT,gr=boost>0?GRAV_B:GRAV;
   if(lift&&gas>0)bal.vy+=lf;
   bal.vy+=gr;
@@ -633,18 +670,13 @@ function update(){
 
   const gy=GY(),cy2=CY();
   if(bal.y<cy2){bal.y=cy2;if(bal.vy<0)bal.vy=0;}
-  if(bal.y>gy){
-    bal.y=gy;if(bal.vy>0)bal.vy=0;
-    if(st==='play'&&dieCD===0)die();
-  }
+  if(bal.y>gy){bal.y=gy;if(bal.vy>0)bal.vy=0;if(st==='play'&&dieCD===0)die();}
 
   if(inv>0)inv--;if(boost>0)boost--;if(magnet>0)magnet--;if(tiny>0)tiny--;
   if(turbo>0){turbo--;score+=0.8;}
   bal.x=BX();
-
   clouds.forEach(c=>{c.x-=c.spd;if(c.x<-80)c.x=W+80;});
 
-  // gas spawn — more frequent when low
   const gasInt=gas<0.3?90:gas<0.6?130:185;
   if(fr-lastGas>gasInt){spawnGas();lastGas=fr;}
   if(fr-lastT>Math.max(60,170-score*.2)){spawnTree();lastT=fr;}
@@ -652,29 +684,10 @@ function update(){
   if(fr-lastBird>rnd(180,300)){spawnBird();lastBird=fr;}
   if(fr-lastStorm>Math.max(300,500-score*.3)){spawnStormCloud();lastStorm=fr;}
 
-  // magnet
-  if(magnet>0){
-    pkups.forEach(p=>{const dx=bal.x-p.x,dy=bal.y-p.y,d=Math.hypot(dx,dy);if(d<220&&d>1){p.x+=dx/d*4;p.y+=dy/d*4;}});
-  }
+  if(magnet>0){pkups.forEach(p=>{const dx=bal.x-p.x,dy=bal.y-p.y,d=Math.hypot(dx,dy);if(d<220&&d>1){p.x+=dx/d*4;p.y+=dy/d*4;}});}
 
-  // trees
-  trees=trees.filter(o=>{
-    o.x-=spd;
-    if(o.x<bal.x+60&&o.x+o.w>bal.x-60){
-      if(hitRect(o.x,o.y,o.w,o.h)&&st==='play'){die();return false;}
-    }
-    return o.x>-70;
-  });
-
-  // storm clouds
-  stormClouds=stormClouds.filter(s=>{
-    s.x-=spd*.8;
-    // collision with storm cloud body
-    if(hitEllipse(s.x,s.y,s.rx,s.ry)&&st==='play'){die();return false;}
-    return s.x>-s.rx-20;
-  });
-
-  // pickups
+  trees=trees.filter(o=>{o.x-=spd;if(o.x<bal.x+60&&o.x+o.w>bal.x-60){if(hitRect(o.x,o.y,o.w,o.h)&&st==='play'){die();return false;}}return o.x>-80;});
+  stormClouds=stormClouds.filter(s=>{s.x-=spd*.8;if(hitEllipse(s.x,s.y,s.rx,s.ry)&&st==='play'){die();return false;}return s.x>-s.rx-20;});
   pkups=pkups.filter(p=>{
     p.x-=spd;
     if(hitCircle(p.x,p.y,p.r)){
@@ -689,18 +702,10 @@ function update(){
     }
     return p.x>-40;
   });
-
-  // birds
   const nearB=birds.find(b=>b.vx>0&&b.x>0&&b.x<bal.x+140&&Math.abs(b.y-bal.y)<80);
   if(nearB)birdWarnT=35;if(birdWarnT>0)birdWarnT--;
   bwEl.style.opacity=birdWarnT>0?'1':'0';
-  bwEl.textContent=nearB?'🐦 Птица!':'⚡ Туча!';
-  birds=birds.filter(b=>{
-    b.x+=b.vx;b.y+=b.vy;b.vy+=.018;b.vy*=.95;
-    if(hitCircle(b.x,b.y,10)&&st==='play'){die();return false;}
-    return b.x>-100&&b.x<W+100;
-  });
-
+  birds=birds.filter(b=>{b.x+=b.vx;b.y+=b.vy;b.vy+=.018;b.vy*=.95;if(hitCircle(b.x,b.y,10)&&st==='play'){die();return false;}return b.x>-100&&b.x<W+100;});
   parts=parts.filter(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=.07;p.life-=.04;return p.life>0;});
 
   gfEl.style.width=(Math.max(0,gas)*100)+'%';
@@ -711,18 +716,17 @@ function update(){
   if(gas<=0&&bal.vy<VMAX)bal.vy=Math.min(bal.vy+.3,VMAX);
 }
 
-// ── screens ───────────────────────────────────────────
 function drawStart(){
   dSky();clouds.forEach(dCloud);dBgBuildings();dGround();
   const bw=Math.min(420,W-32),bh=240;
   ctx.fillStyle='rgba(0,0,0,.6)';ctx.beginPath();ctx.roundRect(W/2-bw/2,H/2-bh/2,bw,bh,18);ctx.fill();
   ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
-  ctx.font=`bold ${Math.min(22,W*.038)}px sans-serif`;ctx.fillText('🎈 Кунгурские аэронавты',W/2,H/2-78);
+  ctx.font=`bold ${Math.min(22,W*.038)}px sans-serif`;ctx.fillText('🎈 Кунгурские аэронавты',W/2,H/2-82);
   ctx.font=`${Math.min(13,W*.022)}px sans-serif`;ctx.fillStyle='rgba(255,255,255,.85)';
-  ctx.fillText('Облетай деревья, тучи и птиц',W/2,H/2-44);
-  ctx.fillText('⛽ газ  🛡 щит  ❤️ жизнь  ⚡ подъём',W/2,H/2-18);
-  ctx.fillText('🧲 магнит  🫧 малыш  🚀 турбо',W/2,H/2+8);
-  ctx.fillText('Кунгур → Пермь → Москва',W/2,H/2+34);
+  ctx.fillText('Облетай деревья, тучи и птиц',W/2,H/2-48);
+  ctx.fillText('⛽ газ  🛡 щит  ❤️ жизнь  ⚡ подъём',W/2,H/2-22);
+  ctx.fillText('🧲 магнит  🫧 малыш  🚀 турбо',W/2,H/2+4);
+  ctx.fillText('Кунгур → Пермь → Москва',W/2,H/2+30);
   ctx.fillStyle='#FFB300';ctx.font=`bold ${Math.min(17,W*.028)}px sans-serif`;
   ctx.fillText('▶  Нажми / коснись экрана',W/2,H/2+76);
 }
@@ -767,11 +771,7 @@ function reset(){
   initClouds();initStars();initBgBuildings();updLives();
   st='play';
 }
-
-function handle(dn){
-  if((st==='start'||st==='dead')&&dn){reset();return;}
-  if(st==='play')lift=dn;
-}
+function handle(dn){if((st==='start'||st==='dead')&&dn){reset();return;}if(st==='play')lift=dn;}
 cv.addEventListener('mousedown',()=>handle(true));
 cv.addEventListener('mouseup',()=>handle(false));
 cv.addEventListener('mouseleave',()=>{if(st==='play')lift=false;});
@@ -781,6 +781,7 @@ cv.addEventListener('touchcancel',e=>{e.preventDefault();handle(false);},{passiv
 window.addEventListener('keydown',e=>{if(e.code==='Space'||e.code==='ArrowUp'){e.preventDefault();handle(true);}});
 window.addEventListener('keyup',e=>{if(e.code==='Space'||e.code==='ArrowUp'){e.preventDefault();handle(false);}});
 
+initSprites();
 initClouds();initStars();initBgBuildings();updLives();
 (function loop(){if(st==='play')update();draw();requestAnimationFrame(loop);})();
 })();
