@@ -35,6 +35,10 @@ html,body{width:100%;height:100%;background:#111;overflow:hidden;font-family:sys
   <div id="hn">Держи экран / пробел — подъём</div>
   <div id="lb"></div>
   <div id="bw2">⚡ Туча!</div>
+  <div id="audio-btns" style="position:absolute;top:10px;right:10px;display:flex;gap:6px;pointer-events:all">
+    <button id="btn-music" onclick="toggleMusic();this.style.opacity=musicOn?'1':'.4'" title="Музыка" style="background:rgba(0,0,0,.35);border:none;border-radius:8px;padding:5px 9px;color:#fff;font-size:15px;cursor:pointer;opacity:1">🎵</button>
+    <button id="btn-sfx"   onclick="toggleSfx();this.style.opacity=sfxOn?'1':'.4'"   title="Звуки"  style="background:rgba(0,0,0,.35);border:none;border-radius:8px;padding:5px 9px;color:#fff;font-size:15px;cursor:pointer;opacity:1">🔊</button>
+  </div>
 </div>
 <script>
 (function(){
@@ -67,6 +71,186 @@ const LOCS=[{n:'Кунгур',d:0},{n:'Пермь',d:900},{n:'Москва',d:22
 let st='start',score=0,gas=1,lives=3,fr=0,spd=2.2,scrollX=0,gasDecay=0.00065;
 let lift=false;
 let inv=0,INV_MAX=300,boost=0,boostMax=0,magnet=0,tiny=0,turbo=0;
+
+// ── Audio Engine ──────────────────────────────────────
+let AC=null,musicGain=null,sfxGain=null,burnerNode=null,musicNodes=[];
+let audioReady=false,musicOn=true,sfxOn=true;
+
+function initAudio(){
+  if(AC)return;
+  AC=new(window.AudioContext||window.webkitAudioContext)();
+  musicGain=AC.createGain();musicGain.gain.value=0.18;musicGain.connect(AC.destination);
+  sfxGain=AC.createGain();sfxGain.gain.value=0.55;sfxGain.connect(AC.destination);
+  audioReady=true;
+  startMusic();
+}
+
+// ── play one-shot tone ────────────────────────────────
+function playTone(freq,type,dur,vol,attack,decay,pitchEnd){
+  if(!audioReady||!sfxOn)return;
+  const o=AC.createOscillator(),g=AC.createGain();
+  o.type=type||'sine';o.frequency.value=freq;
+  if(pitchEnd)o.frequency.linearRampToValueAtTime(pitchEnd,AC.currentTime+dur);
+  g.gain.setValueAtTime(0,AC.currentTime);
+  g.gain.linearRampToValueAtTime(vol||0.4,AC.currentTime+(attack||0.01));
+  g.gain.exponentialRampToValueAtTime(0.001,AC.currentTime+dur-(decay||0.02));
+  o.connect(g);g.connect(sfxGain);
+  o.start(AC.currentTime);o.stop(AC.currentTime+dur);
+}
+
+// ── play noise burst (explosion / hit) ───────────────
+function playNoise(dur,vol,freq1,freq2){
+  if(!audioReady||!sfxOn)return;
+  const buf=AC.createBuffer(1,Math.round(AC.sampleRate*dur),AC.sampleRate);
+  const d=buf.getChannelData(0);
+  for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1);
+  const src=AC.createBufferSource();src.buffer=buf;
+  const filt=AC.createBiquadFilter();filt.type='bandpass';
+  filt.frequency.value=freq1||400;
+  filt.frequency.linearRampToValueAtTime(freq2||200,AC.currentTime+dur);
+  filt.Q.value=1.5;
+  const g=AC.createGain();g.gain.setValueAtTime(vol||0.3,AC.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001,AC.currentTime+dur);
+  src.connect(filt);filt.connect(g);g.connect(sfxGain);
+  src.start();src.stop(AC.currentTime+dur);
+}
+
+// ── sound events ──────────────────────────────────────
+function sndBurnerOn(){
+  if(!audioReady||!sfxOn)return;
+  if(burnerNode){try{burnerNode.stop();}catch(e){}burnerNode=null;}
+  const buf=AC.createBuffer(1,Math.round(AC.sampleRate*0.12),AC.sampleRate);
+  const d=buf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1);
+  const src=AC.createBufferSource();src.buffer=buf;src.loop=true;
+  const filt=AC.createBiquadFilter();filt.type='highpass';filt.frequency.value=800;
+  const g=AC.createGain();g.gain.setValueAtTime(0,AC.currentTime);
+  g.gain.linearRampToValueAtTime(0.15,AC.currentTime+0.05);
+  src.connect(filt);filt.connect(g);g.connect(sfxGain);
+  src.start();burnerNode={src,g};
+}
+function sndBurnerOff(){
+  if(!burnerNode)return;
+  try{
+    burnerNode.g.gain.setValueAtTime(burnerNode.g.gain.value,AC.currentTime);
+    burnerNode.g.gain.exponentialRampToValueAtTime(0.001,AC.currentTime+0.08);
+    burnerNode.src.stop(AC.currentTime+0.1);
+  }catch(e){}
+  burnerNode=null;
+}
+function sndGas(){
+  // satisfying "whoosh refill"
+  playTone(180,'sine',0.25,0.35,0.02,0.05,380);
+  playTone(360,'sine',0.18,0.2,0.05,0.04,580);
+}
+function sndPickup(){
+  // bright ding
+  playTone(880,'sine',0.12,0.4,0.005,0.02,1200);
+  setTimeout(()=>playTone(1320,'sine',0.1,0.3,0.005,0.02),60);
+}
+function sndLife(){
+  // joyful ascending chord
+  [440,554,659,880].forEach((f,i)=>setTimeout(()=>playTone(f,'sine',0.2,0.35,0.01,0.05),i*55));
+}
+function sndShield(){
+  // sparkly sweep
+  playTone(600,'square',0.22,0.15,0.01,0.04,1400);
+  playTone(800,'sine',0.18,0.2,0.02,0.04,1800);
+}
+function sndTurbo(){
+  playTone(200,'sawtooth',0.3,0.2,0.01,0.05,600);
+  playNoise(0.15,0.18,300,800);
+}
+function sndMagnet(){
+  playTone(440,'sine',0.15,0.25,0.01,0.04,320);
+  playTone(660,'sine',0.12,0.2,0.02,0.04,480);
+}
+function sndTiny(){
+  playTone(1200,'sine',0.18,0.3,0.005,0.03,600);
+}
+function sndHit(){
+  playNoise(0.18,0.45,500,150);
+  playTone(120,'sawtooth',0.2,0.35,0.005,0.04,60);
+}
+function sndDie(){
+  playNoise(0.35,0.5,400,80);
+  playTone(200,'sawtooth',0.4,0.4,0.01,0.1,50);
+  setTimeout(()=>playTone(80,'sine',0.3,0.3,0.02,0.1),120);
+}
+function sndStart(){
+  [261,329,392,523].forEach((f,i)=>setTimeout(()=>playTone(f,'sine',0.25,0.3,0.01,0.06),i*80));
+}
+function sndLocChange(){
+  playTone(523,'sine',0.15,0.3,0.01,0.04);
+  setTimeout(()=>playTone(659,'sine',0.15,0.3,0.01,0.04),100);
+  setTimeout(()=>playTone(784,'sine',0.2,0.35,0.01,0.05),200);
+}
+
+// ── procedural music ──────────────────────────────────
+// Gentle folk-ish melody — pentatonic, non-intrusive
+function startMusic(){
+  if(!audioReady||!musicOn)return;
+  stopMusic();
+
+  // Bass drone — long sustained low note
+  const drone=AC.createOscillator();
+  const droneG=AC.createGain();droneG.gain.value=0.12;
+  drone.type='sine';drone.frequency.value=82; // E2
+  drone.connect(droneG);droneG.connect(musicGain);
+  drone.start();musicNodes.push(drone,droneG);
+
+  // Pad — warm chord
+  const padFreqs=[130,164,196,246]; // E pentatonic
+  padFreqs.forEach(f=>{
+    const o=AC.createOscillator(),g=AC.createGain();
+    o.type='triangle';o.frequency.value=f;
+    g.gain.value=0.06;
+    o.connect(g);g.connect(musicGain);
+    o.start();musicNodes.push(o,g);
+  });
+
+  // Melody — gentle repeating folk motif
+  const melody=[
+    [329,0.4],[392,0.4],[440,0.4],[392,0.4],
+    [329,0.6],[294,0.4],[261,0.4],[294,0.4],
+    [329,0.4],[392,0.4],[493,0.4],[440,0.4],
+    [392,0.8],[329,0.4],[261,0.8],[0,0.4],
+  ];
+  let melodyTimer=null;
+  function playMelody(){
+    if(!audioReady||!musicOn)return;
+    let t=AC.currentTime+0.1;
+    melody.forEach(([freq,dur])=>{
+      if(freq>0){
+        const o=AC.createOscillator(),g=AC.createGain();
+        o.type='triangle';o.frequency.value=freq;
+        g.gain.setValueAtTime(0,t);
+        g.gain.linearRampToValueAtTime(0.18,t+0.04);
+        g.gain.exponentialRampToValueAtTime(0.001,t+dur*0.88);
+        o.connect(g);g.connect(musicGain);
+        o.start(t);o.stop(t+dur);
+      }
+      t+=dur;
+    });
+    const totalDur=melody.reduce((a,[,d])=>a+d,0);
+    melodyTimer=setTimeout(playMelody,(totalDur*1000)+200);
+    musicNodes.push({stop:()=>clearTimeout(melodyTimer)});
+  }
+  playMelody();
+
+  // Night variant — slower, lower melody (switched by timeIdx)
+}
+
+function stopMusic(){
+  musicNodes.forEach(n=>{try{if(n.stop)n.stop();}catch(e){}});
+  musicNodes=[];
+}
+function toggleMusic(){
+  musicOn=!musicOn;
+  if(musicOn&&audioReady)startMusic();else stopMusic();
+}
+function toggleSfx(){sfxOn=!sfxOn;}
+window.toggleMusic=toggleMusic;
+window.toggleSfx=toggleSfx;
 let timeIdx=0,locIdx=0,timeTimer=0;
 let bal={x:200,y:300,vy:0};
 let trees=[],clouds=[],stormClouds=[],pkups=[],birds=[],parts=[],bgB=[],bgD=[],stars=[];
@@ -93,43 +277,8 @@ function makeSVGSprite(key,svgStr,sw,sh){
 }
 
 function initSprites(){
-  // ── BALLOON ──────────────────────────────────────
-  makeSVGSprite('balloon',`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-80 -92 160 200">
-    <defs>
-      <clipPath id="bc"><ellipse cx="0" cy="0" rx="72" ry="78"/></clipPath>
-      <radialGradient id="bs" cx="35%" cy="30%" r="60%">
-        <stop offset="0%" stop-color="rgba(255,255,255,.32)"/>
-        <stop offset="100%" stop-color="rgba(0,0,0,.28)"/>
-      </radialGradient>
-    </defs>
-    <g clip-path="url(#bc)">
-      <rect x="-72" y="-78" width="48" height="156" fill="#003F87"/>
-      <rect x="-24" y="-78" width="48" height="156" fill="#FFFFFF"/>
-      <rect x="24"  y="-78" width="48" height="156" fill="#CC0000"/>
-      <line x1="-48" y1="-78" x2="-48" y2="78" stroke="rgba(0,0,0,.12)" stroke-width="1.5"/>
-      <line x1="-24" y1="-78" x2="-24" y2="78" stroke="rgba(0,0,0,.15)" stroke-width="1.5"/>
-      <line x1="0"   y1="-78" x2="0"   y2="78" stroke="rgba(0,0,0,.15)" stroke-width="1.5"/>
-      <line x1="24"  y1="-78" x2="24"  y2="78" stroke="rgba(0,0,0,.15)" stroke-width="1.5"/>
-      <line x1="48"  y1="-78" x2="48"  y2="78" stroke="rgba(0,0,0,.12)" stroke-width="1.5"/>
-      <ellipse cx="0" cy="0" rx="72" ry="78" fill="url(#bs)"/>
-    </g>
-    <ellipse cx="0" cy="0" rx="72" ry="78" fill="none" stroke="rgba(0,0,0,.3)" stroke-width="2"/>
-    <ellipse cx="0" cy="0" rx="22" ry="20" fill="white" stroke="rgba(0,0,0,.2)" stroke-width="1"/>
-    <path d="M-8,-8 Q-10,-14 -6,-16 Q-2,-18 0,-14 Q2,-18 6,-16 Q10,-14 8,-8 Q10,-2 8,4 Q4,8 0,9 Q-4,8 -8,4 Q-10,-2 -8,-8Z" fill="#8B4513"/>
-    <circle cx="-5" cy="-12" r="3.5" fill="#8B4513"/>
-    <circle cx="5"  cy="-12" r="3.5" fill="#8B4513"/>
-    <ellipse cx="0" cy="-78" rx="18" ry="6" fill="rgba(0,0,0,.35)"/>
-    <circle cx="0" cy="-78" r="5" fill="#555"/>
-    <ellipse cx="0" cy="78" rx="20" ry="7" fill="rgba(0,0,0,.3)"/>
-    <line x1="-28" y1="60" x2="-20" y2="106" stroke="#5C3A10" stroke-width="2"/>
-    <line x1="-10" y1="72" x2="-12" y2="106" stroke="#5C3A10" stroke-width="2"/>
-    <line x1="10"  y1="72" x2="12"  y2="106" stroke="#5C3A10" stroke-width="2"/>
-    <line x1="28"  y1="60" x2="20"  y2="106" stroke="#5C3A10" stroke-width="2"/>
-    <rect x="-24" y="105" width="48" height="28" rx="4" fill="#8B6914" stroke="#6B4F10" stroke-width="1.5"/>
-    <line x1="-8" y1="105" x2="-8" y2="133" stroke="rgba(0,0,0,.2)" stroke-width="1"/>
-    <line x1="8"  y1="105" x2="8"  y2="133" stroke="rgba(0,0,0,.2)" stroke-width="1"/>
-    <line x1="-24" y1="119" x2="24" y2="119" stroke="rgba(0,0,0,.2)" stroke-width="1"/>
-  </svg>`,160,200);
+  // ── BALLOON — рисуем прямо на canvas, без спрайта ──
+  // (SVG clipPath/gradient ненадёжны через Blob→canvas)
 
   // ── TREE 1 — ель ─────────────────────────────────
   makeSVGSprite('tree0',`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-52 -160 104 165">
@@ -481,50 +630,84 @@ function dBgBuildings(){
   });
 }
 
-// ── balloon ───────────────────────────────────────────
+// ── balloon — pure canvas draw ────────────────────────
 function dBalloon(bx,by,flame){
   const rv=R_VIS(),wb=Math.sin(fr*.06)*1.4,cy=by+wb;
-  // draw sprite (160x200 viewBox scaled to rv*2 wide)
-  const scale=(rv*2)/160;
-  const sw=160*scale,sh=200*scale;
-  // balloon origin in SVG is center of sphere at (0,0), basket ends at y=133
-  // we want sphere center at cy, so top = cy - 92*scale
-  if(SPR.balloon){
-    ctx.drawImage(SPR.balloon, bx-sw/2, cy-92*scale, sw, sh);
-  }
-  // flame inside balloon
+
+  // ropes (4 lines from sphere bottom to basket)
+  ctx.strokeStyle='rgba(60,30,5,.7)';ctx.lineWidth=Math.max(1.5,rv*.04);
+  [[-rv*.4,rv*.78,-rv*.28],[- rv*.15,rv*.88,-rv*.18],[rv*.15,rv*.88,rv*.18],[rv*.4,rv*.78,rv*.28]].forEach(([ox,oy,bx2])=>{
+    ctx.beginPath();ctx.moveTo(bx+ox,cy+oy);ctx.lineTo(bx+bx2,cy+rv+rv*.6);ctx.stroke();
+  });
+
+  // basket — wicker
+  const bkw=rv*.82,bkh=rv*.52,bkx=bx-bkw/2,bky=cy+rv+rv*.55;
+  ctx.fillStyle='#7B5A12';ctx.beginPath();ctx.roundRect(bkx,bky,bkw,bkh,rv*.08);ctx.fill();
+  ctx.strokeStyle='#5A3F0A';ctx.lineWidth=1.5;ctx.stroke();
+  ctx.strokeStyle='rgba(255,255,255,.18)';ctx.lineWidth=1;
+  [.25,.5,.75].forEach(t=>{ctx.beginPath();ctx.moveTo(bkx+bkw*t,bky);ctx.lineTo(bkx+bkw*t,bky+bkh);ctx.stroke();});
+  ctx.beginPath();ctx.moveTo(bkx,bky+bkh*.5);ctx.lineTo(bkx+bkw,bky+bkh*.5);ctx.stroke();
+
+  // flame inside sphere
   if(flame){
-    const t=fr*.08;
-    const jit1=Math.sin(t*1.7)*rv*.08,jit2=Math.sin(t*2.3+1)*rv*.06;
-    ctx.save();
-    ctx.beginPath();ctx.ellipse(bx,cy,rv*.9,rv*.95,0,0,6.28);ctx.clip();
+    const t=fr*.08,jit1=Math.sin(t*1.7)*rv*.08,jit2=Math.sin(t*2.3+1)*rv*.06;
+    ctx.save();ctx.beginPath();ctx.ellipse(bx,cy,rv*.9,rv*.95,0,0,6.28);ctx.clip();
     ctx.fillStyle='rgba(255,80,0,.78)';
-    ctx.beginPath();
-    ctx.moveTo(bx-rv*.2,cy+rv*.65);
+    ctx.beginPath();ctx.moveTo(bx-rv*.2,cy+rv*.65);
     ctx.quadraticCurveTo(bx-rv*.25+jit1,cy+rv*.2,bx+jit1*.5,cy+rv*.1);
     ctx.quadraticCurveTo(bx+rv*.25+jit2,cy+rv*.2,bx+rv*.2,cy+rv*.65);
     ctx.closePath();ctx.fill();
-    ctx.fillStyle='rgba(255,150,0,.88)';
-    ctx.beginPath();
-    ctx.moveTo(bx-rv*.13,cy+rv*.62);
+    ctx.fillStyle='rgba(255,150,0,.9)';
+    ctx.beginPath();ctx.moveTo(bx-rv*.13,cy+rv*.62);
     ctx.quadraticCurveTo(bx-rv*.15+jit2,cy+rv*.28,bx+jit2*.3,cy+rv*.16);
     ctx.quadraticCurveTo(bx+rv*.15+jit1,cy+rv*.28,bx+rv*.13,cy+rv*.62);
     ctx.closePath();ctx.fill();
-    ctx.fillStyle='rgba(255,220,30,.92)';
-    ctx.beginPath();
-    ctx.moveTo(bx-rv*.07,cy+rv*.58);
-    ctx.quadraticCurveTo(bx+jit1*.2,cy+rv*.35,bx+rv*.07,cy+rv*.58);
+    ctx.fillStyle='rgba(255,225,30,.92)';
+    ctx.beginPath();ctx.moveTo(bx-rv*.07,cy+rv*.58);
+    ctx.quadraticCurveTo(bx+jit1*.2,cy+rv*.32,bx+rv*.07,cy+rv*.58);
     ctx.closePath();ctx.fill();
     // sparks
     for(let i=0;i<4;i++){
-      const sx=bx+Math.sin(t*3+i*1.5)*rv*.18;
-      const sy=cy+rv*.18-i*rv*.07+Math.sin(t*2+i)*rv*.04;
+      const sx=bx+Math.sin(t*3+i*1.5)*rv*.18,sy=cy+rv*.15-i*rv*.07+Math.sin(t*2+i)*rv*.04;
       ctx.fillStyle=`rgba(255,${180+Math.floor(Math.random()*75)},0,.8)`;
-      ctx.beginPath();ctx.arc(sx,sy,rv*.03,0,6.28);ctx.fill();
+      ctx.beginPath();ctx.arc(sx,sy,rv*.035,0,6.28);ctx.fill();
     }
     ctx.restore();
   }
-  // boosts glows
+
+  // sphere — clipped stripes (Perm flag: blue / white / red)
+  ctx.save();ctx.beginPath();ctx.ellipse(bx,cy,rv,rv,0,0,6.28);ctx.clip();
+  const pw=rv*2/3;
+  ['#003F87','#FFFFFF','#CC0000'].forEach((c,i)=>{
+    ctx.fillStyle=c;ctx.fillRect(bx-rv+i*pw,cy-rv,pw+.5,rv*2);
+  });
+  // vertical ribs
+  ctx.strokeStyle='rgba(0,0,0,.13)';ctx.lineWidth=1.5;
+  [-rv*.65,-rv*.33,0,rv*.33,rv*.65].forEach(ox=>{
+    ctx.beginPath();ctx.moveTo(bx+ox,cy-rv);ctx.lineTo(bx+ox,cy+rv);ctx.stroke();
+  });
+  // roundness highlight
+  const gr=ctx.createRadialGradient(bx-rv*.3,cy-rv*.3,rv*.05,bx,cy,rv);
+  gr.addColorStop(0,'rgba(255,255,255,.26)');gr.addColorStop(.5,'rgba(255,255,255,.04)');gr.addColorStop(1,'rgba(0,0,0,.28)');
+  ctx.fillStyle=gr;ctx.beginPath();ctx.ellipse(bx,cy,rv,rv,0,0,6.28);ctx.fill();
+  ctx.restore();
+
+  // outline
+  ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(bx,cy,rv,rv,0,0,6.28);ctx.stroke();
+
+  // coat of arms badge — white circle + bear
+  const br=rv*.3;
+  ctx.fillStyle='rgba(255,255,255,.92)';ctx.beginPath();ctx.ellipse(bx,cy,br,br*.9,0,0,6.28);ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,.2)';ctx.lineWidth=1;ctx.stroke();
+  ctx.font=`${rv*.38}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('🐻',bx,cy+rv*.03);
+
+  // top/bottom caps
+  ctx.fillStyle='rgba(0,0,0,.38)';ctx.beginPath();ctx.ellipse(bx,cy-rv,rv*.28,rv*.08,0,0,6.28);ctx.fill();
+  ctx.fillStyle='#555';ctx.beginPath();ctx.arc(bx,cy-rv,rv*.14,0,6.28);ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,.28)';ctx.beginPath();ctx.ellipse(bx,cy+rv,rv*.32,rv*.1,0,0,6.28);ctx.fill();
+
+  // boost glows
   if(inv>0){
     ctx.globalAlpha=(.4+Math.sin(fr*.18)*.4)*(inv/INV_MAX);
     ctx.strokeStyle='#82CFFF';ctx.lineWidth=5;ctx.beginPath();ctx.ellipse(bx,cy,rv+5,rv+5,0,0,6.28);ctx.stroke();
@@ -641,8 +824,8 @@ function die(){
   lives--;updLives();
   addParts(bal.x,bal.y,['#E53935','#FFB300','#42A5F5'],18);
   dieCD=150;
-  if(lives<=0){st='dead';}
-  else{inv=INV_MAX;gas=Math.max(gas,0.45);bal.y=Math.min(bal.y,GY()-60);bal.vy=-10;}
+  if(lives<=0){st='dead';sndDie();}
+  else{inv=INV_MAX;gas=Math.max(gas,0.45);bal.y=Math.min(bal.y,GY()-60);bal.vy=-10;sndHit();}
 }
 
 function hitCircle(ox,oy,or){const r=tiny>0?R_HIT()*.55:R_HIT();return Math.hypot(bal.x-ox,bal.y-oy)<r+or;}
@@ -654,8 +837,11 @@ function update(){
   spd=Math.min(6,2.2+score*.007);
   gasDecay=0.00065+score*.0000008;
   timeTimer++;if(timeTimer>3600){timeTimer=0;timeIdx=(timeIdx+1)%TIMES.length;}
+  // burner sound — on/off with lift
+  if(lift&&gas>0){if(!burnerNode)sndBurnerOn();}else{if(burnerNode)sndBurnerOff();}
+
   const ni=LOCS.findIndex((l,i)=>score>=l.d&&(i===LOCS.length-1||score<LOCS[i+1].d));
-  if(ni!==locIdx){locIdx=ni;initBgBuildings();lbEl.textContent='📍 '+LOCS[locIdx].n;lbEl.style.opacity='1';lbTimer=200;}
+  if(ni!==locIdx){locIdx=ni;initBgBuildings();lbEl.textContent='📍 '+LOCS[locIdx].n;lbEl.style.opacity='1';lbTimer=200;sndLocChange();}
   if(lbTimer>0){lbTimer--;if(lbTimer===0)lbEl.style.opacity='0';}
   if(dieCD>0)dieCD--;
   if(fr>240)hnEl.style.display='none';
@@ -691,13 +877,13 @@ function update(){
   pkups=pkups.filter(p=>{
     p.x-=spd;
     if(hitCircle(p.x,p.y,p.r)){
-      if(p.type==='gas')       {gas=Math.min(1,gas+.55);addParts(p.x,p.y,['#FFB300','#FF7043','#5DCAA5']);}
-      else if(p.type==='invincible'){inv=INV_MAX;addParts(p.x,p.y,['#64B5F6','#E3F2FD']);}
-      else if(p.type==='life') {lives=Math.min(3,lives+1);updLives();addParts(p.x,p.y,['#EF9A9A','#E53935']);}
-      else if(p.type==='speed'){boost=240;boostMax=240;addParts(p.x,p.y,['#CE93D8','#9C27B0']);}
-      else if(p.type==='magnet'){magnet=300;addParts(p.x,p.y,['#FF80C0','#FF2080']);}
-      else if(p.type==='tiny') {tiny=360;addParts(p.x,p.y,['#80FFCC','#00AA66']);}
-      else if(p.type==='turbo'){turbo=180;score+=200;addParts(p.x,p.y,['#FFA030','#FF4000']);}
+      if(p.type==='gas')       {gas=Math.min(1,gas+.55);addParts(p.x,p.y,['#FFB300','#FF7043','#5DCAA5']);sndGas();}
+      else if(p.type==='invincible'){inv=INV_MAX;addParts(p.x,p.y,['#64B5F6','#E3F2FD']);sndShield();}
+      else if(p.type==='life') {lives=Math.min(3,lives+1);updLives();addParts(p.x,p.y,['#EF9A9A','#E53935']);sndLife();}
+      else if(p.type==='speed'){boost=240;boostMax=240;addParts(p.x,p.y,['#CE93D8','#9C27B0']);sndPickup();}
+      else if(p.type==='magnet'){magnet=300;addParts(p.x,p.y,['#FF80C0','#FF2080']);sndMagnet();}
+      else if(p.type==='tiny') {tiny=360;addParts(p.x,p.y,['#80FFCC','#00AA66']);sndTiny();}
+      else if(p.type==='turbo'){turbo=180;score+=200;addParts(p.x,p.y,['#FFA030','#FF4000']);sndTurbo();}
       return false;
     }
     return p.x>-40;
@@ -761,6 +947,7 @@ function draw(){
 
 function reset(){
   resize();
+  if(burnerNode)sndBurnerOff();
   bal={x:BX(),y:H/2,vy:0};
   trees=[];stormClouds=[];pkups=[];birds=[];parts=[];
   score=0;gas=1;lives=3;spd=2.2;scrollX=0;fr=0;
@@ -769,9 +956,14 @@ function reset(){
   timeIdx=0;timeTimer=0;locIdx=0;
   hnEl.style.display='block';lbEl.style.opacity='0';bwEl.style.opacity='0';
   initClouds();initStars();initBgBuildings();updLives();
+  sndStart();
   st='play';
 }
-function handle(dn){if((st==='start'||st==='dead')&&dn){reset();return;}if(st==='play')lift=dn;}
+function handle(dn){
+  initAudio(); // start audio context on first gesture
+  if((st==='start'||st==='dead')&&dn){reset();return;}
+  if(st==='play')lift=dn;
+}
 cv.addEventListener('mousedown',()=>handle(true));
 cv.addEventListener('mouseup',()=>handle(false));
 cv.addEventListener('mouseleave',()=>{if(st==='play')lift=false;});
