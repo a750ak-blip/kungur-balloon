@@ -35,9 +35,35 @@ html,body{width:100%;height:100%;background:#111;overflow:hidden;font-family:sys
   <div id="hn">Держи экран / пробел — подъём</div>
   <div id="lb"></div>
   <div id="bw2">⚡ Туча!</div>
-  <div id="audio-btns" style="position:absolute;top:10px;right:10px;display:flex;gap:6px;pointer-events:all">
-    <button id="btn-music" onclick="toggleMusic();this.style.opacity=musicOn?'1':'.4'" title="Музыка" style="background:rgba(0,0,0,.35);border:none;border-radius:8px;padding:5px 9px;color:#fff;font-size:15px;cursor:pointer;opacity:1">🎵</button>
-    <button id="btn-sfx"   onclick="toggleSfx();this.style.opacity=sfxOn?'1':'.4'"   title="Звуки"  style="background:rgba(0,0,0,.35);border:none;border-radius:8px;padding:5px 9px;color:#fff;font-size:15px;cursor:pointer;opacity:1">🔊</button>
+
+  <!-- audio buttons — bottom right, не мешают жизням -->
+  <div id="audio-btns" style="position:absolute;bottom:48px;right:10px;display:flex;gap:5px;pointer-events:all;z-index:4">
+    <button id="btn-music" onclick="toggleMusic();this.style.opacity=musicOn?'1':'.4'" title="Музыка" style="background:rgba(0,0,0,.4);border:none;border-radius:8px;padding:5px 8px;color:#fff;font-size:14px;cursor:pointer;opacity:1">🎵</button>
+    <button id="btn-sfx" onclick="toggleSfx();this.style.opacity=sfxOn?'1':'.4'" title="Звуки" style="background:rgba(0,0,0,.4);border:none;border-radius:8px;padding:5px 8px;color:#fff;font-size:14px;cursor:pointer;opacity:1">🔊</button>
+    <button onclick="showLeaderboard()" title="Лидеры" style="background:rgba(0,0,0,.4);border:none;border-radius:8px;padding:5px 8px;color:#fff;font-size:14px;cursor:pointer">🏆</button>
+  </div>
+
+  <!-- leaderboard full-screen overlay -->
+  <div id="lb-panel" style="display:none;position:absolute;inset:0;background:rgba(10,8,20,.92);z-index:20;overflow-y:auto">
+    <div style="max-width:420px;margin:0 auto;padding:20px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+        <h2 style="color:#FFD700;font-size:22px;margin:0;font-family:system-ui">🏆 Лидеры</h2>
+        <button onclick="hideLeaderboard()" style="background:rgba(255,255,255,.12);border:none;border-radius:10px;padding:7px 14px;color:#fff;font-size:14px;cursor:pointer;font-family:system-ui">✕ Закрыть</button>
+      </div>
+      <div id="lb-loading" style="color:rgba(255,255,255,.5);text-align:center;padding:30px;font-family:system-ui;font-size:14px">Загружаем...</div>
+      <div id="lb-list" style="font-family:system-ui"></div>
+    </div>
+  </div>
+
+  <!-- new record prompt after game over -->
+  <div id="record-prompt" style="display:none;position:absolute;bottom:130px;left:50%;transform:translateX(-50%);background:rgba(10,8,20,.92);border:1px solid rgba(255,215,0,.3);border-radius:16px;padding:18px 20px;z-index:15;min-width:280px;max-width:90vw;text-align:center;font-family:system-ui">
+    <p style="color:#FFD700;font-weight:700;font-size:16px;margin:0 0 12px">🏆 Отличный результат!</p>
+    <p style="color:rgba(255,255,255,.7);font-size:13px;margin:0 0 12px">Введи имя чтобы попасть в таблицу</p>
+    <div style="display:flex;gap:8px">
+      <input id="rp-name" maxlength="20" placeholder="Твоё имя" style="flex:1;padding:9px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.2);font-size:14px;background:rgba(255,255,255,.1);color:#fff;outline:none;font-family:system-ui"/>
+      <button onclick="submitScoreFromPrompt()" style="background:#FFB300;border:none;border-radius:10px;padding:9px 16px;color:#1A0A00;font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap">Записать</button>
+    </div>
+    <button onclick="document.getElementById('record-prompt').style.display='none'" style="background:none;border:none;color:rgba(255,255,255,.4);font-size:12px;cursor:pointer;margin-top:10px;font-family:system-ui">Пропустить</button>
   </div>
 </div>
 <script>
@@ -68,7 +94,7 @@ const TIMES=[
 ];
 const LOCS=[{n:'Кунгур',d:0},{n:'Пермь',d:900},{n:'Москва',d:2200}];
 
-let st='start',score=0,gas=1,lives=3,fr=0,spd=2.2,scrollX=0,gasDecay=0.00065;
+let st='start',score=0,gas=1,lives=3,fr=0,spd=3.5,scrollX=0,gasDecay=0.00065;
 let lift=false;
 let inv=0,INV_MAX=300,boost=0,boostMax=0,magnet=0,tiny=0,turbo=0;
 
@@ -259,7 +285,86 @@ let dieCD=0,birdWarnT=0,lbTimer=0;
 
 function rnd(a,b){return a+Math.random()*(b-a);}
 
-// ── SVG sprites → offscreen canvas ───────────────────
+// ── Leaderboard — Supabase ────────────────────────────
+const SB_URL='https://thlsatasbstmrnofuisv.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRobHNhdGFzYnN0bXJub2Z1aXN2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3OTI2NjgsImV4cCI6MjA5NzM2ODY2OH0.AowSk6AuGLlu9Sab56Uwd55JA1U-G0HRMDGwPQLVpDA';
+const SB_HDR={'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY};
+
+let pendingScore=0;
+
+async function sbGet(){
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/scores?select=name,score,location,created_at&order=score.desc&limit=20',{headers:SB_HDR});
+    if(!r.ok)return null;
+    return await r.json();
+  }catch(e){return null;}
+}
+
+async function sbInsert(name,score,location){
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/scores',{
+      method:'POST',
+      headers:{...SB_HDR,'Prefer':'return=minimal'},
+      body:JSON.stringify({name,score:Math.floor(score),location})
+    });
+    return r.ok;
+  }catch(e){return false;}
+}
+
+function lbRender(rows){
+  const list=document.getElementById('lb-list');
+  document.getElementById('lb-loading').style.display='none';
+  if(!rows||!rows.length){
+    list.innerHTML='<p style="color:rgba(255,255,255,.5);text-align:center;padding:30px;font-size:14px">Пока нет результатов.<br>Будь первым! 🎈</p>';
+    return;
+  }
+  const medals=['🥇','🥈','🥉'];
+  list.innerHTML=rows.map((e,i)=>{
+    const d=new Date(e.created_at);
+    const dateStr=d.toLocaleDateString('ru',{day:'numeric',month:'short'});
+    return `<div style="display:flex;align-items:center;gap:10px;padding:11px 14px;margin-bottom:6px;
+      background:rgba(255,255,255,${i===0?.14:.07});border-radius:12px;
+      ${i===0?'border:1px solid rgba(255,215,0,.35)':''}">
+      <span style="font-size:20px;min-width:30px;text-align:center">${medals[i]||`<span style="color:rgba(255,255,255,.45);font-size:13px">${i+1}</span>`}</span>
+      <span style="flex:1;font-weight:${i<3?'600':'400'};color:${i===0?'#FFD700':'#fff'};font-size:15px">${e.name}</span>
+      <span style="font-size:11px;color:rgba(255,255,255,.4)">${e.location||''}</span>
+      <span style="color:#FFD700;font-weight:700;font-size:16px;min-width:60px;text-align:right">${e.score} м</span>
+    </div>`;
+  }).join('');
+}
+
+async function showLeaderboard(){
+  const panel=document.getElementById('lb-panel');
+  panel.style.display='block';
+  document.getElementById('lb-loading').style.display='block';
+  document.getElementById('lb-list').innerHTML='';
+  const rows=await sbGet();
+  lbRender(rows);
+}
+function hideLeaderboard(){
+  document.getElementById('lb-panel').style.display='none';
+}
+
+async function submitScoreFromPrompt(){
+  const name=document.getElementById('rp-name').value.trim()||'Аноним';
+  const loc=LOCS.filter(l=>pendingScore>=l.d).pop().n;
+  document.getElementById('record-prompt').style.display='none';
+  // show saving indicator
+  const btn=document.querySelector('#record-prompt button');
+  await sbInsert(name,pendingScore,loc);
+  pendingScore=0;
+}
+
+function maybePromptScore(sc){
+  if(sc<50)return;
+  pendingScore=sc;
+  document.getElementById('rp-name').value='';
+  document.getElementById('record-prompt').style.display='block';
+}
+
+window.showLeaderboard=showLeaderboard;
+window.hideLeaderboard=hideLeaderboard;
+window.submitScoreFromPrompt=submitScoreFromPrompt;
 const SPR={};
 function makeSVGSprite(key,svgStr,sw,sh){
   const img=new Image();
@@ -514,7 +619,23 @@ function initSprites(){
 
 // ── init ──────────────────────────────────────────────
 function initStars(){stars=[];for(let i=0;i<80;i++)stars.push({x:rnd(0,W),y:rnd(0,H*.6),r:rnd(.4,2),t:rnd(0,6.28)});}
-function initClouds(){clouds=[];for(let i=0;i<8;i++)clouds.push({x:rnd(0,W),y:rnd(15,H*.28),rx:rnd(30,70),ry:rnd(14,28),spd:rnd(.2,.5),a:rnd(.55,.9)});}
+function initClouds(){
+  clouds=[];
+  for(let i=0;i<8;i++){
+    const rx=rnd(38,80),ry=rnd(16,30);
+    // each cloud has random puffs array for variety
+    const np=Math.floor(rnd(3,6));
+    const puffs=[];
+    for(let p=0;p<np;p++){
+      puffs.push({
+        ox:rnd(-rx*.7,rx*.7),
+        oy:rnd(-ry*.4,ry*.6),
+        r:rnd(ry*.7,ry*1.4)
+      });
+    }
+    clouds.push({x:rnd(0,W),y:rnd(18,H*.26),rx,ry,spd:rnd(.18,.48),a:rnd(.72,.96),puffs});
+  }
+}
 function initBgDecor(){
   bgD=[];const by=H-50;
   if(locIdx===0){
@@ -553,10 +674,31 @@ function dSun(){
 }
 function dCloud(c){
   const isN=timeIdx===3;
-  ctx.fillStyle=isN?`rgba(60,80,120,${c.a})`:`rgba(255,255,255,${c.a})`;
+  const baseCol=isN?[60,80,130]:[255,255,255];
+  // ensure puffs exist (for clouds created before update)
+  if(!c.puffs){
+    c.puffs=[{ox:0,oy:0,r:c.ry},{ox:-c.rx*.4,oy:4,r:c.ry*.9},{ox:c.rx*.4,oy:3,r:c.ry*.85}];
+  }
+  // shadow under cloud
+  ctx.fillStyle=isN?`rgba(20,25,50,.18)`:`rgba(150,160,180,.18)`;
+  ctx.beginPath();ctx.ellipse(c.x+4,c.y+c.ry+6,c.rx*.85,c.ry*.35,0,0,6.28);ctx.fill();
+  // base blob
+  ctx.fillStyle=`rgba(${baseCol[0]},${baseCol[1]},${baseCol[2]},${c.a})`;
   ctx.beginPath();ctx.ellipse(c.x,c.y,c.rx,c.ry,0,0,6.28);ctx.fill();
-  ctx.beginPath();ctx.ellipse(c.x-c.rx*.4,c.y+4,c.rx*.6,c.ry*.7,0,0,6.28);ctx.fill();
-  ctx.beginPath();ctx.ellipse(c.x+c.rx*.4,c.y+3,c.rx*.62,c.ry*.6,0,0,6.28);ctx.fill();
+  // puffs on top
+  c.puffs.forEach(p=>{
+    ctx.fillStyle=`rgba(${baseCol[0]},${baseCol[1]},${baseCol[2]},${c.a})`;
+    ctx.beginPath();ctx.arc(c.x+p.ox,c.y-p.oy,p.r,0,6.28);ctx.fill();
+  });
+  // highlight on top-left puff
+  if(!isN){
+    ctx.fillStyle=`rgba(255,255,255,${c.a*.5})`;
+    const hp=c.puffs[0];
+    ctx.beginPath();ctx.ellipse(c.x+hp.ox-hp.r*.25,c.y-hp.oy-hp.r*.28,hp.r*.45,hp.r*.3,-.4,0,6.28);ctx.fill();
+  }
+  // subtle bottom shadow on base
+  ctx.fillStyle=isN?`rgba(30,35,70,.25)`:`rgba(180,190,210,.28)`;
+  ctx.beginPath();ctx.ellipse(c.x,c.y+c.ry*.25,c.rx*.9,c.ry*.45,0,0,6.28);ctx.fill();
 }
 function dGround(){
   const n=timeIdx===3;
@@ -760,23 +902,68 @@ function dStormCloud(s){
 
 // ── bird ──────────────────────────────────────────────
 function dBird(b){
-  b.wing+=b.wingDir*.14;if(b.wing>.5||b.wing<-.5)b.wingDir*=-1;
-  const sc=1+b.wing*.15;
-  if(SPR.bird){
-    ctx.save();ctx.translate(b.x,b.y);
-    if(b.vx<0)ctx.scale(-1,1);
-    ctx.scale(1,sc);
-    ctx.drawImage(SPR.bird,-38,-14,76,28);
-    ctx.restore();
-  } else {
-    const col=timeIdx===3?'#9898B8':'#281808';
-    ctx.strokeStyle=col;ctx.lineWidth=2.5;
-    ctx.beginPath();ctx.moveTo(b.x-16,b.y-b.wing*16);ctx.quadraticCurveTo(b.x,b.y,b.x+16,b.y-b.wing*16);ctx.stroke();
-    ctx.fillStyle=col;ctx.beginPath();ctx.ellipse(b.x,b.y,6,4,0,0,6.28);ctx.fill();
-  }
-  if(b.vx>0&&b.x>0&&b.x<bal.x+100&&b.x>bal.x-30){
-    ctx.fillStyle='rgba(255,60,60,.85)';
-    ctx.beginPath();ctx.moveTo(b.x-14,b.y-7);ctx.lineTo(b.x-24,b.y);ctx.lineTo(b.x-14,b.y+7);ctx.closePath();ctx.fill();
+  // faster wing flap
+  b.wing+=b.wingDir*.22;
+  if(b.wing>1)  {b.wing=1; b.wingDir=-1;}
+  if(b.wing<-1) {b.wing=-1;b.wingDir=1;}
+
+  const col=timeIdx===3?'#9898B8':'#2A1808';
+  const wf=b.wing; // -1..1, 0=level, 1=up, -1=down
+  const wx=22;     // half wingspan
+
+  ctx.save();
+  ctx.translate(b.x,b.y);
+  if(b.vx<0)ctx.scale(-1,1); // flip for rightward birds
+
+  // left wing — curves up/down
+  ctx.strokeStyle=col;ctx.lineWidth=2.5;ctx.lineCap='round';
+  ctx.beginPath();
+  ctx.moveTo(0,0);
+  ctx.quadraticCurveTo(-wx*.55, wf*-12, -wx, wf*-10);
+  ctx.stroke();
+  // wing trailing edge
+  ctx.beginPath();
+  ctx.moveTo(-wx*.2,0);
+  ctx.quadraticCurveTo(-wx*.6, wf*-14+2, -wx+2, wf*-11+3);
+  ctx.stroke();
+
+  // right wing
+  ctx.beginPath();
+  ctx.moveTo(0,0);
+  ctx.quadraticCurveTo(wx*.55, wf*-12, wx, wf*-10);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(wx*.2,0);
+  ctx.quadraticCurveTo(wx*.6, wf*-14+2, wx-2, wf*-11+3);
+  ctx.stroke();
+
+  // body
+  ctx.fillStyle=col;
+  ctx.beginPath();ctx.ellipse(0,0,8,4,-.2,0,6.28);ctx.fill();
+
+  // head
+  ctx.beginPath();ctx.arc(-7,-1,5,0,6.28);ctx.fill();
+
+  // beak
+  ctx.fillStyle='#9B7520';
+  ctx.beginPath();ctx.moveTo(-12,-1);ctx.lineTo(-17,0);ctx.lineTo(-12,2);ctx.closePath();ctx.fill();
+
+  // eye
+  ctx.fillStyle='white';ctx.beginPath();ctx.arc(-8,-2,1.8,0,6.28);ctx.fill();
+  ctx.fillStyle='#111';ctx.beginPath();ctx.arc(-8,-2,1,0,6.28);ctx.fill();
+
+  // tail feathers
+  ctx.strokeStyle=col;ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(8,0);ctx.lineTo(15,4);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(8,0);ctx.lineTo(15,-3);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(8,0);ctx.lineTo(16,1);ctx.stroke();
+
+  ctx.restore();
+
+  // warning arrow if coming from behind
+  if(b.vx>0&&b.x>0&&b.x<bal.x+110&&b.x>bal.x-30){
+    ctx.fillStyle='rgba(255,50,50,.88)';
+    ctx.beginPath();ctx.moveTo(b.x-16,b.y-8);ctx.lineTo(b.x-26,b.y);ctx.lineTo(b.x-16,b.y+8);ctx.closePath();ctx.fill();
   }
 }
 
@@ -799,8 +986,11 @@ function updLives(){lvEl.innerHTML='';for(let i=0;i<3;i++){const s=document.crea
 function addParts(x,y,cols,n=12){for(let i=0;i<n;i++){const a=rnd(0,6.28),sp=rnd(1.5,4);parts.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-1,life:1,r:rnd(3,6),col:cols[Math.floor(rnd(0,cols.length))]});}}
 
 function spawnTree(){
-  const h=rnd(H*.22,H*.38);
   const variant=Math.floor(rnd(0,3));
+  const sizeClass=Math.floor(rnd(0,3));
+  const hRanges=[[H*.12,H*.20],[H*.22,H*.32],[H*.33,H*.44]];
+  const [hMin,hMax]=hRanges[sizeClass];
+  const h=rnd(hMin,hMax);
   const widths=[104,130,100];
   const scale=h/[165,200,200][variant];
   trees.push({x:W+30,y:H-50-h,w:widths[variant]*scale,h,variant});
@@ -824,7 +1014,7 @@ function die(){
   lives--;updLives();
   addParts(bal.x,bal.y,['#E53935','#FFB300','#42A5F5'],18);
   dieCD=150;
-  if(lives<=0){st='dead';sndDie();}
+  if(lives<=0){st='dead';sndDie();maybePromptScore(score);}
   else{inv=INV_MAX;gas=Math.max(gas,0.45);bal.y=Math.min(bal.y,GY()-60);bal.vy=-10;sndHit();}
 }
 
@@ -834,7 +1024,7 @@ function hitEllipse(ox,oy,erx,ery){const r=tiny>0?R_HIT()*.55:R_HIT();const dx=(
 
 function update(){
   fr++;scrollX+=spd;score+=spd*.05;
-  spd=Math.min(6,2.2+score*.007);
+  spd=Math.min(9,3.5+score*.009);
   gasDecay=0.00065+score*.0000008;
   timeTimer++;if(timeTimer>3600){timeTimer=0;timeIdx=(timeIdx+1)%TIMES.length;}
   // burner sound — on/off with lift
@@ -904,17 +1094,35 @@ function update(){
 
 function drawStart(){
   dSky();clouds.forEach(dCloud);dBgBuildings();dGround();
-  const bw=Math.min(420,W-32),bh=240;
-  ctx.fillStyle='rgba(0,0,0,.6)';ctx.beginPath();ctx.roundRect(W/2-bw/2,H/2-bh/2,bw,bh,18);ctx.fill();
-  ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
-  ctx.font=`bold ${Math.min(22,W*.038)}px sans-serif`;ctx.fillText('🎈 Кунгурские аэронавты',W/2,H/2-82);
-  ctx.font=`${Math.min(13,W*.022)}px sans-serif`;ctx.fillStyle='rgba(255,255,255,.85)';
-  ctx.fillText('Облетай деревья, тучи и птиц',W/2,H/2-48);
-  ctx.fillText('⛽ газ  🛡 щит  ❤️ жизнь  ⚡ подъём',W/2,H/2-22);
-  ctx.fillText('🧲 магнит  🫧 малыш  🚀 турбо',W/2,H/2+4);
-  ctx.fillText('Кунгур → Пермь → Москва',W/2,H/2+30);
-  ctx.fillStyle='#FFB300';ctx.font=`bold ${Math.min(17,W*.028)}px sans-serif`;
-  ctx.fillText('▶  Нажми / коснись экрана',W/2,H/2+76);
+  const fs=Math.min(13,W*.028);
+  const bw=Math.min(380,W-40),bh=210;
+  const bx2=W/2-bw/2, by2=H/2-bh/2;
+  ctx.fillStyle='rgba(0,0,0,.62)';
+  ctx.beginPath();ctx.roundRect(bx2,by2,bw,bh,18);ctx.fill();
+  // title
+  ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.font=`bold ${Math.min(20,W*.042)}px sans-serif`;
+  ctx.fillText('🎈 Кунгурские аэронавты',W/2,by2+18);
+  // subtitle
+  ctx.font=`${fs}px sans-serif`;ctx.fillStyle='rgba(255,255,255,.8)';
+  ctx.fillText('Облетай деревья, тучи и птиц',W/2,by2+52);
+  // boosts row 1
+  ctx.fillText('⛽ газ  🛡 щит  ❤️ жизнь  ⚡ подъём',W/2,by2+76);
+  // boosts row 2
+  ctx.fillText('🧲 магнит  🫧 малыш  🚀 турбо',W/2,by2+98);
+  // route
+  ctx.fillStyle='rgba(255,255,255,.65)';
+  ctx.fillText('Кунгур → Пермь → Москва',W/2,by2+120);
+  // cta button
+  const btnW=Math.min(260,bw-40),btnH=36,btnX=W/2-btnW/2,btnY=by2+bh-54;
+  ctx.fillStyle='#FFB300';ctx.beginPath();ctx.roundRect(btnX,btnY,btnW,btnH,10);ctx.fill();
+  ctx.fillStyle='#3A2000';ctx.font=`bold ${Math.min(15,W*.03)}px sans-serif`;
+  ctx.textBaseline='middle';
+  ctx.fillText('▶  Нажми / коснись экрана',W/2,btnY+btnH/2);
+  // leaderboard hint
+  ctx.fillStyle='rgba(255,255,255,.55)';ctx.font=`${Math.min(11,W*.022)}px sans-serif`;
+  ctx.textBaseline='top';
+  ctx.fillText('🏆 таблица лидеров — свайп вниз',W/2,by2+bh-16);
 }
 function drawDead(){
   ctx.fillStyle='rgba(0,0,0,.65)';ctx.fillRect(0,0,W,H);
@@ -950,11 +1158,13 @@ function reset(){
   if(burnerNode)sndBurnerOff();
   bal={x:BX(),y:H/2,vy:0};
   trees=[];stormClouds=[];pkups=[];birds=[];parts=[];
-  score=0;gas=1;lives=3;spd=2.2;scrollX=0;fr=0;
+  score=0;gas=1;lives=3;spd=3.5;scrollX=0;fr=0;
   lastT=0;lastP=0;lastBird=0;lastGas=0;lastStorm=0;
   inv=0;boost=0;boostMax=0;dieCD=0;magnet=0;tiny=0;turbo=0;
   timeIdx=0;timeTimer=0;locIdx=0;
   hnEl.style.display='block';lbEl.style.opacity='0';bwEl.style.opacity='0';
+  document.getElementById('record-prompt').style.display='none';
+  document.getElementById('lb-panel').style.display='none';
   initClouds();initStars();initBgBuildings();updLives();
   sndStart();
   st='play';
